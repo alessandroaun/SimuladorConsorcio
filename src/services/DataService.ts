@@ -5,9 +5,8 @@ const STORAGE_KEY_DB = '@consorcio_db_v1';
 const STORAGE_KEY_META = '@consorcio_meta_v1';
 const STORAGE_KEY_DATE = '@consorcio_last_update';
 
-// URL onde seu JSON estará hospedado (Ex: GitHub Gist ou S3)
-// Por enquanto, deixamos vazio ou use um exemplo
-const REMOTE_API_URL = 'https://sua-api.com/dados-consorcio.json'; 
+// COLOCAREMOS A URL DO SEU JSON AQUI FUTURAMENTE
+const REMOTE_API_URL = 'https://raw.githubusercontent.com/alessandroaun/SimuladorConsorcio/refs/heads/master/dados_consorcio.json'; // Mantenha vazio por enquanto para simulação
 
 export interface AppData {
   tables: TableMetadata[];
@@ -17,12 +16,12 @@ export interface AppData {
 
 export const DataService = {
   /**
-   * Inicializa os dados: Tenta pegar do cache, se não existir, usa o Mock local.
-   * Em background, tenta atualizar da internet.
+   * Inicializa os dados: 
+   * 1. Tenta pegar do cache do celular (AsyncStorage).
+   * 2. Se não tiver cache, usa o MOCK_DB local (Hardcoded).
    */
   async initialize(): Promise<AppData> {
     try {
-      // 1. Tentar ler do armazenamento local (Cache)
       const cachedDB = await AsyncStorage.getItem(STORAGE_KEY_DB);
       const cachedMeta = await AsyncStorage.getItem(STORAGE_KEY_META);
       const lastUpdate = await AsyncStorage.getItem(STORAGE_KEY_DATE);
@@ -39,40 +38,54 @@ export const DataService = {
       console.error('Erro ao ler cache local:', e);
     }
 
-    // 2. Se não tiver cache, retorna os dados embarcados (Hardcoded)
-    console.log('Cache vazio. Usando dados embarcados (Mock).');
+    console.log('Cache vazio ou erro. Usando dados embarcados (Fallback).');
     return {
       tables: TABLES_METADATA,
-      db: MOCK_DB, // O MOCK_DB do TableRepository deve ser exportado
+      db: MOCK_DB, // Aqui ele usa o MOCK que exportamos no TableRepository
       lastUpdate: null
     };
   },
 
   /**
-   * Chamado para forçar uma atualização remota (ex: ao abrir o app ou puxar pra atualizar)
+   * Chamado em segundo plano para tentar atualizar os dados da nuvem.
+   * Retorna os NOVOS dados baixados (AppData) em caso de sucesso, ou null.
    */
-  async syncWithRemote(): Promise<boolean> {
-    try {
-      // Simulação de fetch (Substitua pelo fetch real)
-      // const response = await fetch(REMOTE_API_URL);
-      // const data = await response.json();
-      
-      // Supondo que a API retorne { metadata: [], data: {} }
-      // const { metadata, data } = apiResult;
-
-      // Validação básica antes de salvar
-      // if (!data || !metadata) throw new Error("Dados inválidos");
-
-      // Salvar no Cache
-      // await AsyncStorage.setItem(STORAGE_KEY_DB, JSON.stringify(data));
-      // await AsyncStorage.setItem(STORAGE_KEY_META, JSON.stringify(metadata));
-      // await AsyncStorage.setItem(STORAGE_KEY_DATE, new Date().toISOString());
-      
+  async syncWithRemote(): Promise<AppData | null> {
+    if (!REMOTE_API_URL) {
+      // Simulação: Apenas simula que a busca foi um sucesso e retorna o MOCK_DB
+      // Na prática, se REMOTE_API_URL é vazio, não há sync.
       console.log('Sincronização realizada com sucesso (Simulado).');
-      return true;
+      return {
+        tables: TABLES_METADATA,
+        db: MOCK_DB, 
+        lastUpdate: new Date().toISOString()
+      };
+    }
+
+    try {
+      console.log('Buscando atualizações...');
+      const response = await fetch(REMOTE_API_URL);
+      const apiResult = await response.json();
+      
+      const { metadata, data } = apiResult;
+
+      if (!data || !metadata) throw new Error("Formato de JSON inválido");
+
+      // Salva no celular para a próxima vez
+      await AsyncStorage.setItem(STORAGE_KEY_DB, JSON.stringify(data));
+      await AsyncStorage.setItem(STORAGE_KEY_META, JSON.stringify(metadata));
+      await AsyncStorage.setItem(STORAGE_KEY_DATE, new Date().toISOString());
+      
+      console.log('Dados atualizados da nuvem com sucesso.');
+      return {
+        tables: metadata,
+        db: data,
+        lastUpdate: new Date().toISOString()
+      };
+
     } catch (error) {
-      console.warn('Sem internet ou erro na API. Mantendo dados atuais.');
-      return false;
+      console.log('Sem internet ou API indisponível. Mantendo dados atuais.');
+      return null;
     }
   }
 };

@@ -22,26 +22,30 @@ export default function App() {
 
   useEffect(() => {
     const load = async () => {
+      let initialData: AppData;
+      
       try {
         // 1. Inicializa os dados (Prioridade: Cache do Celular > Arquivo Local Mock)
-        // Isso garante que o app abra rápido e funcione offline
-        const data = await DataService.initialize();
-        setAppData(data);
+        // Isso carrega a versão atual dos dados para renderização inicial rápida
+        initialData = await DataService.initialize();
+        setAppData(initialData);
       } catch (error) {
-        console.error("Erro fatal ao carregar dados:", error);
+        console.error("Erro fatal ao carregar dados iniciais:", error);
+        return; 
       } finally {
         // Remove a tela de loading assim que tivermos qualquer dado válido
         setIsLoading(false);
       }
 
-      // 2. Tenta atualizar em segundo plano (Sync)
-      // O usuário já está usando o app com os dados atuais, enquanto isso
-      // o app vai no GitHub verificar se tem novidade para a PRÓXIMA vez.
-      DataService.syncWithRemote().then((updated) => {
-         if (updated) {
-            console.log("Novas tabelas baixadas e salvas no cache para o futuro.");
-         }
-      });
+      // 2. Tenta atualizar em segundo plano (Sync com GitHub/API)
+      const updatedData = await DataService.syncWithRemote();
+      
+      if (updatedData) {
+         // **CORREÇÃO CRÍTICA:** Se a sincronização trouxer dados novos,
+         // atualizamos o estado 'appData' imediatamente.
+         setAppData(updatedData);
+         console.log("Interface atualizada com dados mais recentes.");
+      }
     };
 
     load();
@@ -59,6 +63,7 @@ export default function App() {
     );
   }
 
+  // Navegação principal, que só é renderizada depois que os dados (appData) estiverem prontos
   return (
     <NavigationContainer>
       <Stack.Navigator 
@@ -68,7 +73,7 @@ export default function App() {
         <Stack.Screen 
           name="Home" 
           component={HomeScreen} 
-          // Passamos as tabelas carregadas para a Home saber quais categorias exibir
+          // Correção: Passamos as tabelas carregadas (que agora podem ser as recém-atualizadas)
           initialParams={{ tables: appData.tables }} 
         />
         

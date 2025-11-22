@@ -3,28 +3,38 @@ import { View, Text, TouchableOpacity, ScrollView, StyleSheet, SafeAreaView } fr
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { ArrowLeft, ChevronRight } from 'lucide-react-native';
 import { RootStackParamList } from '../types/navigation';
-import { TABLES_METADATA } from '../../data/TableRepository';
+// REMOVIDA: A lista de tabelas não é mais importada, ela vem da navegação.
+// import { TABLES_METADATA } from '../../data/TableRepository'; 
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TableSelection'>;
 
 export default function TableSelectionScreen({ route, navigation }: Props) {
-  const { category } = route.params;
-  const tables = TABLES_METADATA.filter(t => t.category === category);
+  // CORREÇÃO: Desestruturamos 'category' E 'tables' dos parâmetros de rota.
+  // A lista 'tables' agora contém os dados ATUALIZADOS do GitHub, filtrados pelo HomeScreen.
+  const { category, tables } = route.params; 
+
+  // REMOVIDA: A linha abaixo era a fonte do problema, pois usava a lista estática:
+  // const tables = TABLES_METADATA.filter(t => t.category === category);
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.navHeader}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+        <TouchableOpacity 
+          // O onPress faz navigation.goBack() para voltar à HomeScreen
+          onPress={() => navigation.goBack()} 
+          style={styles.backBtn}
+        >
           <ArrowLeft color="#0F172A" size={24} />
         </TouchableOpacity>
-        <Text style={styles.navTitle}>Tabelas {category}</Text>
+        <Text style={styles.navTitle}>Tabelas {category} ({tables.length})</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {tables.map((table) => (
+        {tables.length > 0 ? tables.map((table) => (
           <TouchableOpacity 
             key={table.id} 
             style={styles.tableCard}
+            // Ao clicar, navegamos para o formulário, passando a tabela selecionada
             onPress={() => navigation.navigate('SimulationForm', { table })}
           >
             <View style={styles.tableRow}>
@@ -44,7 +54,12 @@ export default function TableSelectionScreen({ route, navigation }: Props) {
               <ChevronRight color="#94A3B8" size={24} />
             </View>
           </TouchableOpacity>
-        ))}
+        )) : (
+            <View style={styles.emptyContainer}>
+                <Text style={styles.emptyTitle}>Nenhuma tabela disponível</Text>
+                <Text style={styles.emptySubtitle}>Esta categoria não possui planos ativos no momento. Verifique o JSON remoto.</Text>
+            </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -63,4 +78,7 @@ const styles = StyleSheet.create({
   badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
   badgeText: { fontSize: 10, fontWeight: 'bold' },
   tableMeta: { fontSize: 12, color: '#64748B' },
+  emptyContainer: { alignItems: 'center', padding: 30, backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#FFDEDE', marginTop: 20 },
+  emptyTitle: { fontSize: 16, fontWeight: 'bold', color: '#B91C1C' },
+  emptySubtitle: { fontSize: 14, color: '#DC2626', marginTop: 5 }
 });
