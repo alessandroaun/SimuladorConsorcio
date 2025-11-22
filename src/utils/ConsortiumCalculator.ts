@@ -1,26 +1,6 @@
-/**
- * ============================================================================
- * ConsortiumCalculator.ts
- * Lógica central de cálculo financeiro do simulador.
- * ============================================================================
- */
+import { TableMetadata, PlanType } from '../../data/TableRepository';
 
-// --- Tipos e Interfaces ---
-
-export type PlanType = 'NORMAL' | 'LIGHT' | 'SUPERLIGHT';
-export type InstallmentType = 'C/SV' | 'S/SV'; // Com Seguro Vida / Sem Seguro Vida
-export type Category = 'AUTO' | 'IMOVEL' | 'MOTO' | 'SERVICOS';
-
-export interface TableMetadata {
-  id: string;
-  name: string;
-  category: Category;
-  plan: PlanType;
-  taxaAdmin: number;
-  fundoReserva: number;
-  seguroPct?: number;
-  maxLanceEmbutido: number;
-}
+export type InstallmentType = 'C/SV' | 'S/SV';
 
 export interface SimulationInput {
   tableId: string;
@@ -30,156 +10,186 @@ export interface SimulationInput {
   lanceBolso: number;
   lanceEmbutidoPct: number;
   lanceCartaVal: number;
-  taxaAdesaoPct: number; // NOVO: 0, 0.005, 0.01 ou 0.02
+  taxaAdesaoPct: number;
+  
+  // NOVO CAMPO: Substitui os enums antigos.
+  // Define a INTENÇÃO do usuário: Quanto % do lance ele QUER usar para reduzir parcela.
+  // O sistema tentará usar isso. Se bater no limite de 40%, o resto vai pro prazo automaticamente.
+  percentualLanceParaParcela: number; // 0 a 100
+  
+  mesContemplacao: number; 
 }
 
-export interface AmortizationRow {
+export interface ContemplationScenario {
   mes: number;
-  saldoDevedor: number;
-  valorPago: number;
+  mesRelativo: number;
+  novoPrazo: number; // Mantemos float para precisão interna
+  novaParcela: number;
+  amortizacaoInfo: string;
 }
 
 export interface SimulationResult {
-  // Valores Mensais
   parcelaPreContemplacao: number;
   parcelaPosContemplacao: number;
-  
-  // Detalhamento da Parcela
-  seguroMensal: number;
-  
-  // NOVO: Detalhamento Adesão (1ª Parcela)
-  valorAdesao: number;
-  totalPrimeiraParcela: number;
-
-  // Totais
   custoTotal: number;
   taxaAdminValor: number;
   fundoReservaValor: number;
-  
-  // Lances e Crédito
+  seguroMensal: number;
+  valorAdesao: number;
+  totalPrimeiraParcela: number;
   creditoOriginal: number;
   creditoLiquido: number;
   lanceTotal: number;
-  lanceEmbutidoValor: number;
-  
-  // Metadados
   plano: PlanType;
-  amortizacao: AmortizationRow[];
+  lanceCartaVal: number; 
+  cenariosContemplacao: ContemplationScenario[];
 }
 
-// --- Constantes de Negócio ---
-const SEGURO_RATES = {
-  IMOVEL: 0.00059,
-  OUTROS: 0.00084
-};
-
 export class ConsortiumCalculator {
-
-  static calculate(
-    input: SimulationInput, 
-    tableMeta: TableMetadata, 
-    rawParcela: number
-  ): SimulationResult {
+  static calculate(input: SimulationInput, tableMeta: TableMetadata, rawParcela: number): SimulationResult {
+    const { credito, prazo, lanceEmbutidoPct, lanceBolso, lanceCartaVal, tipoParcela, taxaAdesaoPct, percentualLanceParaParcela, mesContemplacao } = input;
     
-    const { credito, prazo, lanceEmbutidoPct, lanceBolso, lanceCartaVal, tipoParcela, taxaAdesaoPct } = input;
-
-    // 1. Seguro
-    const defaultSeguroRate = tableMeta.category === 'IMOVEL' ? SEGURO_RATES.IMOVEL : SEGURO_RATES.OUTROS;
-    const seguroRate = tableMeta.seguroPct || defaultSeguroRate;
-    
-    let valorSeguroMensal = credito * seguroRate;
-    if (tipoParcela === 'S/SV') {
-        valorSeguroMensal = 0;
-    }
-
-    // 2. Totais Administrativos
+    // --- Cálculos Básicos ---
+    const seguroRate = tipoParcela === 'C/SV' ? tableMeta.seguroPct : 0;
+    const seguroMensal = credito * seguroRate;
     const taxaAdminValor = credito * tableMeta.taxaAdmin;
     const fundoReservaValor = credito * tableMeta.fundoReserva;
-
-    // 3. Parcela Pré (Recorrente)
-    let parcelaPre = rawParcela;
-
-    // --- NOVA LÓGICA: TAXA DE ADESÃO ---
     const valorAdesao = credito * taxaAdesaoPct;
-    // A primeira parcela é a soma da parcela mensal normal + a taxa de adesão
-    const totalPrimeiraParcela = parcelaPre + valorAdesao;
 
-    // 4. Planos Light/SL
-    let fatorPlano = 1.0;
-    if (tableMeta.plan === 'LIGHT') fatorPlano = 0.75;
-    if (tableMeta.plan === 'SUPERLIGHT') fatorPlano = 0.50;
-
-    // 5. Lances
     const lanceEmbutidoValor = credito * lanceEmbutidoPct;
     const lanceTotal = lanceBolso + lanceEmbutidoValor + lanceCartaVal;
     const creditoLiquido = credito - lanceEmbutidoValor - lanceCartaVal;
 
-    // 6. Pós-Contemplação
-    let parcelaPos = parcelaPre;
+    const parcelaPre = rawParcela;
+
+    // --- Lógica Pós-Contemplação Padrão (Base para cálculo do saldo devedor) ---
+    let fatorPlano = 1.0;
+    if (tableMeta.plan === 'LIGHT') fatorPlano = 0.75;
+    if (tableMeta.plan === 'SUPERLIGHT') fatorPlano = 0.50;
+
+    let parcelaPosPadrao = parcelaPre;
     if (tableMeta.plan !== 'NORMAL') {
       const diferencaCredito = credito * (1 - fatorPlano);
-      const acrescimo = diferencaCredito / prazo;
-      parcelaPos = parcelaPre + acrescimo;
+      const acrescimo = diferencaCredito / prazo; 
+      parcelaPosPadrao = parcelaPre + acrescimo;
     }
 
-    // 7. Custo Total
-    // O custo total considera a parcela normal vezes o prazo + a taxa de adesão paga na entrada
-    const custoTotal = (parcelaPre * prazo) + valorAdesao;
+    // --- 5. GERAÇÃO DA TABELA DE CENÁRIOS (5 MESES) ---
+    const cenariosContemplacao: ContemplationScenario[] = [];
+    const mesInicial = mesContemplacao > 0 ? mesContemplacao : 1;
 
-    // 8. Amortização
-    const amortizacao: AmortizationRow[] = [];
-    let saldoDevedorTecnico = custoTotal; 
-    let acumuladoPago = 0;
-
-    for (let i = 1; i <= prazo; i++) {
-      // Se for o mês 1, o cliente paga mais (com adesão), mas para fins de amortização de saldo devedor
-      // a taxa de adesão é um custo extra que não necessariamente abate saldo da carta da mesma forma.
-      // Para simplificar o gráfico, vamos somar o valor pago real.
-      let valorPagoNoMes = parcelaPre;
-      if (i === 1) valorPagoNoMes += valorAdesao;
-
-      acumuladoPago += valorPagoNoMes;
-      saldoDevedorTecnico -= valorPagoNoMes; // Simplificação gráfica
+    for (let i = 0; i < 5; i++) {
+      const mesAtual = mesInicial + i;
       
-      if (saldoDevedorTecnico < 0) saldoDevedorTecnico = 0;
+      if (mesAtual > prazo) break;
 
-      amortizacao.push({
-        mes: i,
-        saldoDevedor: saldoDevedorTecnico,
-        valorPago: acumuladoPago
+      // 1. Definir Saldo Devedor Restante no momento da contemplação
+      // Assumimos que as parcelas anteriores a 'mesAtual' já foram pagas ou não entram na conta de amortização.
+      // Prazo Restante = Total - Parcelas já passadas (mesAtual).
+      const prazoRestante = prazo - mesAtual; 
+      
+      // Base de cálculo: Parcela Cheia (Normal ou Pós-Light recomposta)
+      const baseParcela = tableMeta.plan === 'NORMAL' ? parcelaPre : parcelaPosPadrao;
+      
+      const saldoDevedorTotal = baseParcela * prazoRestante;
+      
+      // O Lance abate o saldo devedor TOTAL, independente de como alteramos a parcela/prazo.
+      // É matemática pura: Dívida Nova = Dívida Velha - Dinheiro do Lance.
+      const saldoPosLance = saldoDevedorTotal - lanceTotal;
+
+      let novoPrazo = prazoRestante;
+      let novaParcela = baseParcela;
+      let info = "";
+
+      if (saldoPosLance <= 0) {
+        novoPrazo = 0;
+        novaParcela = 0;
+        info = "Quitado";
+      } else {
+        // 2. Definir a Nova Parcela baseada na preferência do usuário
+        
+        // Quanto do lance o usuário GOSTARIA de usar para abater parcela?
+        const lanceAlocadoIntencao = lanceTotal * (percentualLanceParaParcela / 100);
+        
+        // Se usássemos esse valor para reduzir linearmente a parcela no prazo restante atual:
+        const reducaoMensal = lanceAlocadoIntencao / prazoRestante;
+        let parcelaDesejada = baseParcela - reducaoMensal;
+
+        // 3. Aplicar a trava de 40% (A nova parcela não pode ser menor que 60% da original)
+        const parcelaMinimaPermitida = baseParcela * 0.60; 
+
+        if (parcelaDesejada < parcelaMinimaPermitida) {
+            // Se a redução desejada viola o limite, travamos no limite.
+            novaParcela = parcelaMinimaPermitida;
+            info = "Max Red. Parcela (40%)";
+        } else {
+            // Caso contrário, acatamos a parcela calculada pelo percentual escolhido
+            novaParcela = parcelaDesejada;
+            if (percentualLanceParaParcela > 0) {
+                info = `Red. Parcela (${percentualLanceParaParcela}%)`;
+            } else {
+                info = "Red. Prazo (100%)";
+            }
+        }
+
+        // 4. Calcular o Novo Prazo Automaticamente
+        // Fórmula Mágica: Prazo = Saldo Devedor Restante / Valor da Parcela que vou pagar
+        // O 'saldoPosLance' já considera TODO o lance descontado.
+        // Portanto, se travamos a parcela em um valor mais alto (devido aos 40%), 
+        // o saldo será dividido por um número maior, resultando em menos meses (redução de prazo automática).
+        
+        if (novaParcela > 0) {
+             novoPrazo = saldoPosLance / novaParcela;
+        } else {
+             novoPrazo = 0;
+        }
+      }
+
+      cenariosContemplacao.push({
+        mes: mesAtual,
+        mesRelativo: i + 1,
+        novoPrazo, 
+        novaParcela,
+        amortizacaoInfo: info
       });
     }
 
+    const totalPrimeiraParcela = parcelaPre + valorAdesao;
+    
+    // Custo Total = Crédito Líquido + Taxas + Seguros
+    const totalSeguro = seguroMensal * prazo;
+    const custoTotal = creditoLiquido + taxaAdminValor + fundoReservaValor + totalSeguro;
+
     return {
       parcelaPreContemplacao: parcelaPre,
-      parcelaPosContemplacao: parcelaPos,
-      seguroMensal: valorSeguroMensal,
-      
-      // NOVOS CAMPOS
-      valorAdesao,
-      totalPrimeiraParcela,
-
+      parcelaPosContemplacao: parcelaPosPadrao,
+      seguroMensal,
       custoTotal,
       taxaAdminValor,
       fundoReservaValor,
-      
+      valorAdesao,
+      totalPrimeiraParcela,
       creditoOriginal: credito,
       creditoLiquido,
       lanceTotal,
-      lanceEmbutidoValor,
-      
       plano: tableMeta.plan,
-      amortizacao
+      lanceCartaVal,
+      cenariosContemplacao
     };
   }
 
   static validate(input: SimulationInput, tableMeta: TableMetadata): string | null {
     if (input.lanceEmbutidoPct > tableMeta.maxLanceEmbutido) {
-      return `O lance embutido máximo para esta tabela é de ${(tableMeta.maxLanceEmbutido * 100).toFixed(0)}%`;
+      return `Máximo de lance embutido: ${(tableMeta.maxLanceEmbutido * 100).toFixed(0)}%`;
     }
-    if (input.credito <= 0) return "O valor do crédito deve ser maior que zero.";
-    if (input.prazo <= 0) return "Selecione um prazo válido.";
+    if (input.credito <= 0) return "Valor de crédito inválido.";
     
+    const lanceEmbVal = input.credito * input.lanceEmbutidoPct;
+    const totalLances = input.lanceBolso + lanceEmbVal + input.lanceCartaVal;
+    if (totalLances >= input.credito) {
+      return "A soma dos lances não pode ser igual ou maior que o crédito total.";
+    }
+
     return null;
   }
 }

@@ -3,8 +3,9 @@ import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, StatusBar } fro
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Car, Home as HomeIcon, Bike, Wrench } from 'lucide-react-native';
 import { RootStackParamList } from '../types/navigation';
-import { Category } from '../utils/ConsortiumCalculator'; 
-import { TableMetadata } from '../../data/TableRepository'; // Necessário para tipagem local
+
+// CORREÇÃO: Importamos Category e TableMetadata do TableRepository (onde eles são definidos)
+import { Category, TableMetadata } from '../../data/TableRepository'; 
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
@@ -39,7 +40,7 @@ export default function HomeScreen({ navigation, route }: Props) {
     // 3. Navega, enviando os DOIS parâmetros necessários para a próxima tela
     navigation.navigate('TableSelection', { 
       category: categoryId, 
-      tables: tablesForCategory // <-- RESOLVE O ERRO DE TIPAGEM AGORA
+      tables: tablesForCategory 
     });
   };
 
