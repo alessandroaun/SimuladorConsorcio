@@ -1,7 +1,8 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, SafeAreaView, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context'; // Atualizado para evitar warning
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { ArrowLeft, Share2 } from 'lucide-react-native';
+import { ArrowLeft, Share2, CheckCircle2 } from 'lucide-react-native';
 import { RootStackParamList } from '../types/navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Result'>;
@@ -28,9 +29,10 @@ export default function ResultScreen({ route, navigation }: Props) {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Cabeçalho Parcela */}
+        
+        {/* Cabeçalho Parcela Normal */}
         <View style={styles.resultHeader}>
-          <Text style={styles.resultLabel}>PARCELA MENSAL</Text>
+          <Text style={styles.resultLabel}>PARCELA MENSAL (2ª em diante)</Text>
           <Text style={styles.resultBigValue}>{formatBRL(result.parcelaPreContemplacao)}</Text>
           {result.plano !== 'NORMAL' && (
             <View style={styles.warnBadge}>
@@ -38,6 +40,20 @@ export default function ResultScreen({ route, navigation }: Props) {
             </View>
           )}
         </View>
+
+        {/* --- NOVO: DESTAQUE PARA PRIMEIRA PARCELA COM ADESÃO --- */}
+        {result.valorAdesao > 0 && (
+          <View style={styles.highlightBox}>
+            <View style={styles.highlightHeader}>
+              <CheckCircle2 color="#fff" size={20} />
+              <Text style={styles.highlightTitle}>PAGAMENTO NO ATO (1ª PARCELA)</Text>
+            </View>
+            <Text style={styles.highlightSubtitle}>
+              Parcela ({formatBRL(result.parcelaPreContemplacao)}) + Adesão ({formatBRL(result.valorAdesao)})
+            </Text>
+            <Text style={styles.highlightValue}>{formatBRL(result.totalPrimeiraParcela)}</Text>
+          </View>
+        )}
 
         {/* Resumo Crédito/Prazo */}
         <View style={styles.grid}>
@@ -91,6 +107,14 @@ export default function ResultScreen({ route, navigation }: Props) {
             <Text style={styles.text}>Seguro Mensal:</Text>
             <Text style={styles.text}>{formatBRL(result.seguroMensal)}</Text>
           </View>
+          
+          {result.valorAdesao > 0 && (
+             <View style={styles.rowBetween}>
+              <Text style={styles.text}>Taxa de Adesão (Ato):</Text>
+              <Text style={styles.text}>{formatBRL(result.valorAdesao)}</Text>
+            </View>
+          )}
+
           <View style={styles.divider} />
           <View style={styles.rowBetween}>
             <Text style={styles.textBold}>Custo Total Previsto:</Text>
@@ -147,4 +171,11 @@ const styles = StyleSheet.create({
   newParcela: { fontSize: 24, fontWeight: 'bold', color: '#15803D', marginTop: 4 },
   mainBtn: { borderRadius: 12, padding: 16, alignItems: 'center' },
   mainBtnText: { fontWeight: 'bold', fontSize: 16 },
+  
+  // NOVOS ESTILOS PARA ADESÃO
+  highlightBox: { backgroundColor: '#0F172A', borderRadius: 16, padding: 20, marginBottom: 24, alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 5, elevation: 4 },
+  highlightHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 8 },
+  highlightTitle: { color: '#fff', fontWeight: 'bold', fontSize: 14, letterSpacing: 1 },
+  highlightSubtitle: { color: '#94A3B8', fontSize: 12, marginBottom: 4 },
+  highlightValue: { color: '#22C55E', fontSize: 32, fontWeight: 'bold' }
 });

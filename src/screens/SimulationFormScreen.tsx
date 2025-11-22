@@ -1,12 +1,20 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, TextInput, SafeAreaView, Alert, Switch, Modal } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { ArrowLeft, Calculator, DollarSign } from 'lucide-react-native';
+import { ArrowLeft, Calculator, DollarSign, ShieldCheck, CheckCircle2 } from 'lucide-react-native';
 import { RootStackParamList } from '../types/navigation';
 import { getTableData } from '../../data/TableRepository';
 import { ConsortiumCalculator, SimulationInput, InstallmentType } from '../utils/ConsortiumCalculator';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'SimulationForm'>;
+
+// Opções de Adesão
+const ADESAO_OPTIONS = [
+  { label: 'Isento', value: 0 },
+  { label: '0.5%', value: 0.005 },
+  { label: '1%', value: 0.01 },
+  { label: '2%', value: 0.02 },
+];
 
 export default function SimulationFormScreen({ route, navigation }: Props) {
   const { table } = route.params;
@@ -16,6 +24,9 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
   const [creditoInput, setCreditoInput] = useState('');
   const [prazoIdx, setPrazoIdx] = useState<number | null>(null);
   const [tipoParcela, setTipoParcela] = useState<InstallmentType>('S/SV');
+  
+  // NOVO STATE: Adesão
+  const [adesaoPct, setAdesaoPct] = useState(0);
   
   // Lance States
   const [showLanceModal, setShowLanceModal] = useState(false);
@@ -32,6 +43,20 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
 
   const availablePrazos = selectedRow ? selectedRow.prazos : [];
 
+  const isSeguroObrigatorio = useMemo(() => {
+    if (availablePrazos.length > 0) {
+      const sample = availablePrazos[0] as any;
+      return sample.parcela !== undefined;
+    }
+    return false;
+  }, [availablePrazos]);
+
+  useEffect(() => {
+    if (isSeguroObrigatorio) {
+      setTipoParcela('C/SV');
+    }
+  }, [isSeguroObrigatorio]);
+
   const handleCalculate = () => {
     if (!selectedRow || prazoIdx === null) {
       Alert.alert("Dados incompletos", "Por favor, selecione um crédito válido e um prazo.");
@@ -40,13 +65,10 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
 
     const prazoObj = availablePrazos[prazoIdx];
     
-    // Resolve qual valor de parcela base usar (do CSV)
     let rawParcela = 0;
     if (prazoObj.parcela) {
-      // CSVs tipo Auto_L usam coluna única já tratada na importação
       rawParcela = prazoObj.parcela;
     } else {
-      // CSVs tipo Normal/Imóvel usam colunas C/SV e S/SV explícitas
       rawParcela = tipoParcela === 'C/SV' ? prazoObj.parcela_CSV : prazoObj.parcela_SSV;
     }
 
@@ -62,7 +84,8 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
       tipoParcela,
       lanceBolso: parseFloat(lanceBolso) || 0,
       lanceEmbutidoPct: lanceEmbPct,
-      lanceCartaVal: 0
+      lanceCartaVal: 0,
+      taxaAdesaoPct: adesaoPct // Passa o valor selecionado
     };
 
     const error = ConsortiumCalculator.validate(input, table);
@@ -74,8 +97,6 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
     const result = ConsortiumCalculator.calculate(input, table, rawParcela);
     navigation.navigate('Result', { result, input });
   };
-
-  const formatCurrency = (val: number) => val.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'});
 
   return (
     <SafeAreaView style={styles.container}>
@@ -98,7 +119,6 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
             onChangeText={setCreditoInput}
             placeholderTextColor="#94A3B8"
           />
-          {/* Chips de Sugestão */}
           {!selectedRow && availableCredits.length > 0 && (
             <View style={styles.chipContainer}>
               {availableCredits.slice(0, 6).map((c) => (
@@ -128,17 +148,54 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
           </View>
         </View>
 
+        {/* TAXA DE ADESÃO (NOVO BLOCO) */}
+        <View style={styles.card}>
+          <Text style={styles.label}>Taxa de Adesão (1ª Parcela)</Text>
+          <View style={styles.pillsContainer}>
+            {ADESAO_OPTIONS.map((opt) => (
+              <TouchableOpacity 
+                key={opt.value} 
+                style={[styles.pill, adesaoPct === opt.value && styles.pillActive]}
+                onPress={() => setAdesaoPct(opt.value)}
+              >
+                <Text style={[styles.pillText, adesaoPct === opt.value && styles.pillTextActive]}>
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <Text style={styles.helperText}>
+            Valor adicional cobrado apenas no ato da contratação.
+          </Text>
+        </View>
+
         {/* SEGURO TOGGLE */}
         <View style={styles.card}>
-          <View style={styles.rowBetween}>
-            <Text style={styles.label}>Seguro Prestamista</Text>
-            <Switch 
-              value={tipoParcela === 'C/SV'}
-              onValueChange={(v) => setTipoParcela(v ? 'C/SV' : 'S/SV')}
-              trackColor={{true: '#0EA5E9', false: '#E2E8F0'}}
-            />
-          </View>
-          <Text style={styles.helperText}>{tipoParcela === 'C/SV' ? 'Com proteção (Incluso na parcela)' : 'Sem seguro de vida'}</Text>
+          {isSeguroObrigatorio ? (
+            <View style={styles.mandatoryContainer}>
+              <View style={styles.mandatoryHeader}>
+                 <ShieldCheck color="#0EA5E9" size={24} />
+                 <Text style={styles.mandatoryTitle}>Seguro Prestamista Incluso</Text>
+              </View>
+              <Text style={styles.mandatoryText}>
+                Nesta tabela, o seguro de vida já é obrigatório e está embutido no valor da parcela.
+              </Text>
+            </View>
+          ) : (
+            <>
+              <View style={styles.rowBetween}>
+                <Text style={styles.label}>Seguro Prestamista</Text>
+                <Switch 
+                  value={tipoParcela === 'C/SV'}
+                  onValueChange={(v) => setTipoParcela(v ? 'C/SV' : 'S/SV')}
+                  trackColor={{true: '#0EA5E9', false: '#E2E8F0'}}
+                />
+              </View>
+              <Text style={styles.helperText}>
+                {tipoParcela === 'C/SV' ? 'Com proteção (Incluso na parcela)' : 'Sem seguro de vida'}
+              </Text>
+            </>
+          )}
         </View>
 
         {/* LANCES BUTTON */}
@@ -158,11 +215,10 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
         </TouchableOpacity>
       </ScrollView>
 
-      {/* MODAL DE LANCES */}
+      {/* MODAL DE LANCES (Mantido igual) */}
       <Modal visible={showLanceModal} animationType="slide" presentationStyle="pageSheet">
         <View style={styles.modalContainer}>
           <Text style={styles.modalTitle}>Configurar Lances</Text>
-          
           <Text style={styles.label}>Lance Embutido ({Math.round(lanceEmbPct*100)}%)</Text>
           <View style={styles.rowBetween}>
              {[0, 0.10, 0.25].map(pct => (
@@ -176,7 +232,6 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
              ))}
           </View>
           <Text style={styles.helperText}>Desconta do crédito para facilitar a contemplação.</Text>
-
           <Text style={[styles.label, {marginTop: 24}]}>Lance do Bolso (R$)</Text>
           <TextInput 
             style={styles.input} 
@@ -185,7 +240,6 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
             onChangeText={setLanceBolso}
             placeholder="0.00"
           />
-
           <TouchableOpacity style={[styles.mainBtn, {marginTop: 40}]} onPress={() => setShowLanceModal(false)}>
             <Text style={styles.mainBtnText}>CONFIRMAR LANCES</Text>
           </TouchableOpacity>
@@ -225,4 +279,8 @@ const styles = StyleSheet.create({
   pctBtnActive: { backgroundColor: '#0F172A', borderColor: '#0F172A' },
   pctText: { fontWeight: '600', color: '#334155' },
   pctTextActive: { color: '#fff' },
+  mandatoryContainer: { backgroundColor: '#F0F9FF', borderRadius: 8, padding: 12, borderLeftWidth: 4, borderLeftColor: '#0EA5E9' },
+  mandatoryHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  mandatoryTitle: { fontSize: 16, fontWeight: 'bold', color: '#0369A1', marginLeft: 8 },
+  mandatoryText: { fontSize: 14, color: '#334155', lineHeight: 20 }
 });

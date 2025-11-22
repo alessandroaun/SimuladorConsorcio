@@ -16,20 +16,21 @@ export interface TableMetadata {
   name: string;
   category: Category;
   plan: PlanType;
-  taxaAdmin: number;      // Ex: 0.20 para 20%
-  fundoReserva: number;   // Ex: 0.03 para 3%
-  seguroPct?: number;     // Taxa forçada (opcional), senão usa padrão da categoria
-  maxLanceEmbutido: number; // Ex: 0.25 para 25%
+  taxaAdmin: number;
+  fundoReserva: number;
+  seguroPct?: number;
+  maxLanceEmbutido: number;
 }
 
 export interface SimulationInput {
   tableId: string;
-  credito: number;        // Valor da Carta (C)
-  prazo: number;          // Meses (p)
+  credito: number;
+  prazo: number;
   tipoParcela: InstallmentType;
-  lanceBolso: number;     // Valor R$
-  lanceEmbutidoPct: number; // Decimal (ex: 0.25)
-  lanceCartaVal: number;  // Valor R$ (Carta de Avaliação)
+  lanceBolso: number;
+  lanceEmbutidoPct: number;
+  lanceCartaVal: number;
+  taxaAdesaoPct: number; // NOVO: 0, 0.005, 0.01 ou 0.02
 }
 
 export interface AmortizationRow {
@@ -41,11 +42,15 @@ export interface AmortizationRow {
 export interface SimulationResult {
   // Valores Mensais
   parcelaPreContemplacao: number;
-  parcelaPosContemplacao: number; // Estimativa caso opte por recompor crédito (Opção B)
+  parcelaPosContemplacao: number;
   
   // Detalhamento da Parcela
   seguroMensal: number;
   
+  // NOVO: Detalhamento Adesão (1ª Parcela)
+  valorAdesao: number;
+  totalPrimeiraParcela: number;
+
   // Totais
   custoTotal: number;
   taxaAdminValor: number;
@@ -53,7 +58,7 @@ export interface SimulationResult {
   
   // Lances e Crédito
   creditoOriginal: number;
-  creditoLiquido: number; // O que sobra na mão após descontar lances que abatem crédito
+  creditoLiquido: number;
   lanceTotal: number;
   lanceEmbutidoValor: number;
   
@@ -63,97 +68,78 @@ export interface SimulationResult {
 }
 
 // --- Constantes de Negócio ---
-
 const SEGURO_RATES = {
-  IMOVEL: 0.00059, // 0.059% a.m.
-  OUTROS: 0.00084  // 0.084% a.m. (Auto, Moto, Serviços)
+  IMOVEL: 0.00059,
+  OUTROS: 0.00084
 };
 
 export class ConsortiumCalculator {
 
-  /**
-   * Realiza o cálculo completo da simulação.
-   * * @param input Dados inseridos pelo usuário (crédito, prazo, lances)
-   * @param tableMeta Metadados da tabela selecionada (taxas, tipo de plano)
-   * @param rawParcela Valor da parcela BASE obtido do arquivo JSON/CSV. 
-   * IMPORTANTE: Este valor já deve considerar a taxa de adm diluída 
-   * conforme a tabela da administradora.
-   */
   static calculate(
     input: SimulationInput, 
     tableMeta: TableMetadata, 
     rawParcela: number
   ): SimulationResult {
     
-    const { credito, prazo, lanceEmbutidoPct, lanceBolso, lanceCartaVal, tipoParcela } = input;
+    const { credito, prazo, lanceEmbutidoPct, lanceBolso, lanceCartaVal, tipoParcela, taxaAdesaoPct } = input;
 
-    // 1. Definição de Taxas de Seguro
-    // Se a tabela tiver uma taxa específica no JSON, usa ela. Senão, usa a padrão da categoria.
+    // 1. Seguro
     const defaultSeguroRate = tableMeta.category === 'IMOVEL' ? SEGURO_RATES.IMOVEL : SEGURO_RATES.OUTROS;
     const seguroRate = tableMeta.seguroPct || defaultSeguroRate;
     
-    const valorSeguroMensal = credito * seguroRate;
+    let valorSeguroMensal = credito * seguroRate;
+    if (tipoParcela === 'S/SV') {
+        valorSeguroMensal = 0;
+    }
 
-    // 2. Totais Administrativos (Apenas Informativo/Detalhamento)
-    // O valor real pago está embutido na 'rawParcela', mas calculamos aqui para mostrar ao usuário.
+    // 2. Totais Administrativos
     const taxaAdminValor = credito * tableMeta.taxaAdmin;
     const fundoReservaValor = credito * tableMeta.fundoReserva;
 
-    // 3. Cálculo da Parcela Pré-Contemplação
-    // A rawParcela vem do CSV. 
-    // Se o usuário escolheu 'C/SV', a rawParcela já tem o seguro somado.
-    // Se escolheu 'S/SV', ela não tem.
-    // O app não altera a parcela do CSV, apenas a repassa como "Parcela Inicial".
+    // 3. Parcela Pré (Recorrente)
     let parcelaPre = rawParcela;
 
-    // 4. Lógica de Planos (Light / Super Light)
-    // Define quanto do crédito é pago na parcela reduzida (Fator base)
-    let fatorPlano = 1.0; // NORMAL (100%)
+    // --- NOVA LÓGICA: TAXA DE ADESÃO ---
+    const valorAdesao = credito * taxaAdesaoPct;
+    // A primeira parcela é a soma da parcela mensal normal + a taxa de adesão
+    const totalPrimeiraParcela = parcelaPre + valorAdesao;
+
+    // 4. Planos Light/SL
+    let fatorPlano = 1.0;
     if (tableMeta.plan === 'LIGHT') fatorPlano = 0.75;
     if (tableMeta.plan === 'SUPERLIGHT') fatorPlano = 0.50;
 
-    // 5. Cálculo de Lances
+    // 5. Lances
     const lanceEmbutidoValor = credito * lanceEmbutidoPct;
     const lanceTotal = lanceBolso + lanceEmbutidoValor + lanceCartaVal;
-
-    // Crédito Líquido: Quanto o cliente recebe na mão para comprar o bem.
-    // Regra: Lance embutido SEMPRE desconta do crédito. 
-    // Regra: Lance carta de avaliação também costuma abater do crédito disponível se usada para quitar lance.
     const creditoLiquido = credito - lanceEmbutidoValor - lanceCartaVal;
 
-    // 6. Cenário Pós-Contemplação (Opção B - Recomposição)
-    // Se o plano for Light ou SL, e o cliente quiser o crédito CHEIO (100%) na contemplação,
-    // a parcela sobe para cobrir a diferença que não foi paga anteriormente.
-    
+    // 6. Pós-Contemplação
     let parcelaPos = parcelaPre;
-
     if (tableMeta.plan !== 'NORMAL') {
-      // Diferença que deixou de ser paga (ex: 25% ou 50% do crédito total)
       const diferencaCredito = credito * (1 - fatorPlano);
-      
-      // Essa diferença deve ser diluída no prazo restante.
-      // Como é uma simulação "fria", não sabemos quando ele será contemplado.
-      // A prática de mercado para simulação de venda é projetar o reajuste linear.
-      // Adicionamos a diferença dividida pelo prazo total à parcela.
-      // (Nota: Em produção real, seria dividido pelo prazo REMANESCENTE, que varia mês a mês).
       const acrescimo = diferencaCredito / prazo;
-      
       parcelaPos = parcelaPre + acrescimo;
     }
 
-    // 7. Custo Total Previsto
-    // Considera parcelas pré-contemplação pelo prazo total (Cenário base sem reajuste antecipado)
-    const custoTotal = parcelaPre * prazo;
+    // 7. Custo Total
+    // O custo total considera a parcela normal vezes o prazo + a taxa de adesão paga na entrada
+    const custoTotal = (parcelaPre * prazo) + valorAdesao;
 
-    // 8. Mapa de Amortização Simplificado
-    // Gera um array para plotar gráfico de saldo devedor vs valor pago
+    // 8. Amortização
     const amortizacao: AmortizationRow[] = [];
     let saldoDevedorTecnico = custoTotal; 
     let acumuladoPago = 0;
 
     for (let i = 1; i <= prazo; i++) {
-      acumuladoPago += parcelaPre;
-      saldoDevedorTecnico -= parcelaPre;
+      // Se for o mês 1, o cliente paga mais (com adesão), mas para fins de amortização de saldo devedor
+      // a taxa de adesão é um custo extra que não necessariamente abate saldo da carta da mesma forma.
+      // Para simplificar o gráfico, vamos somar o valor pago real.
+      let valorPagoNoMes = parcelaPre;
+      if (i === 1) valorPagoNoMes += valorAdesao;
+
+      acumuladoPago += valorPagoNoMes;
+      saldoDevedorTecnico -= valorPagoNoMes; // Simplificação gráfica
       
       if (saldoDevedorTecnico < 0) saldoDevedorTecnico = 0;
 
@@ -169,6 +155,10 @@ export class ConsortiumCalculator {
       parcelaPosContemplacao: parcelaPos,
       seguroMensal: valorSeguroMensal,
       
+      // NOVOS CAMPOS
+      valorAdesao,
+      totalPrimeiraParcela,
+
       custoTotal,
       taxaAdminValor,
       fundoReservaValor,
@@ -183,9 +173,6 @@ export class ConsortiumCalculator {
     };
   }
 
-  /**
-   * Valida se a simulação é possível
-   */
   static validate(input: SimulationInput, tableMeta: TableMetadata): string | null {
     if (input.lanceEmbutidoPct > tableMeta.maxLanceEmbutido) {
       return `O lance embutido máximo para esta tabela é de ${(tableMeta.maxLanceEmbutido * 100).toFixed(0)}%`;
@@ -193,6 +180,6 @@ export class ConsortiumCalculator {
     if (input.credito <= 0) return "O valor do crédito deve ser maior que zero.";
     if (input.prazo <= 0) return "Selecione um prazo válido.";
     
-    return null; // Sem erros
+    return null;
   }
 }
