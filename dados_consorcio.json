@@ -63,7 +63,7 @@
     {
       "id": "t_imovel2011_202_L",
       "name": "Imóvel Grp 2011 Light",
-      "category": "AUTO",
+      "category": "IMOVEL",
       "plan": "LIGHT",
       "taxaAdmin": 0.20,
       "fundoReserva": 0.03,
