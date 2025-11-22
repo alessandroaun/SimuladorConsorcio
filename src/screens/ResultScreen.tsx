@@ -112,7 +112,7 @@ export default function ResultScreen({ route, navigation }: Props) {
 
         <TouchableOpacity 
           style={[styles.mainBtn, {backgroundColor: 'transparent', borderWidth: 1, borderColor: '#0F172A', marginBottom: 20}]} 
-          onPress={() => navigation.navigate('Home')}
+          onPress={() => navigation.popToTop()}
         >
             <Text style={[styles.mainBtnText, {color: '#0F172A'}]}>NOVA SIMULAÇÃO</Text>
         </TouchableOpacity>

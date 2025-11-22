@@ -1,12 +1,18 @@
+// services/DataService.ts
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { MOCK_DB, TABLES_METADATA, TableMetadata } from '../../data/TableRepository';
+import { 
+  MOCK_DB, 
+  TABLES_METADATA, 
+  TableMetadata, 
+  setDatabase // <--- Importe a nova função
+} from '../../data/TableRepository';
 
 const STORAGE_KEY_DB = '@consorcio_db_v1';
 const STORAGE_KEY_META = '@consorcio_meta_v1';
 const STORAGE_KEY_DATE = '@consorcio_last_update';
 
-// COLOCAREMOS A URL DO SEU JSON AQUI FUTURAMENTE
-const REMOTE_API_URL = 'https://raw.githubusercontent.com/alessandroaun/SimuladorConsorcio/refs/heads/master/dados_consorcio.json'; // Mantenha vazio por enquanto para simulação
+// URL do seu GitHub (JSON Raw)
+const REMOTE_API_URL = 'https://raw.githubusercontent.com/alessandroaun/SimuladorConsorcio/refs/heads/master/dados_consorcio.json';
 
 export interface AppData {
   tables: TableMetadata[];
@@ -15,11 +21,6 @@ export interface AppData {
 }
 
 export const DataService = {
-  /**
-   * Inicializa os dados: 
-   * 1. Tenta pegar do cache do celular (AsyncStorage).
-   * 2. Se não tiver cache, usa o MOCK_DB local (Hardcoded).
-   */
   async initialize(): Promise<AppData> {
     try {
       const cachedDB = await AsyncStorage.getItem(STORAGE_KEY_DB);
@@ -27,10 +28,16 @@ export const DataService = {
       const lastUpdate = await AsyncStorage.getItem(STORAGE_KEY_DATE);
 
       if (cachedDB && cachedMeta) {
+        const parsedDB = JSON.parse(cachedDB);
+        const parsedMeta = JSON.parse(cachedMeta);
+
+        // ATUALIZA O REPOSITÓRIO COM O CACHE
+        setDatabase(parsedDB); 
+        
         console.log('Dados carregados do cache local.');
         return {
-          tables: JSON.parse(cachedMeta),
-          db: JSON.parse(cachedDB),
+          tables: parsedMeta,
+          db: parsedDB,
           lastUpdate
         };
       }
@@ -38,44 +45,36 @@ export const DataService = {
       console.error('Erro ao ler cache local:', e);
     }
 
-    console.log('Cache vazio ou erro. Usando dados embarcados (Fallback).');
+    console.log('Cache vazio. Usando dados embarcados.');
+    // Reseta para o Mock caso não tenha cache
+    setDatabase(MOCK_DB); 
+    
     return {
       tables: TABLES_METADATA,
-      db: MOCK_DB, // Aqui ele usa o MOCK que exportamos no TableRepository
+      db: MOCK_DB,
       lastUpdate: null
     };
   },
 
-  /**
-   * Chamado em segundo plano para tentar atualizar os dados da nuvem.
-   * Retorna os NOVOS dados baixados (AppData) em caso de sucesso, ou null.
-   */
   async syncWithRemote(): Promise<AppData | null> {
-    if (!REMOTE_API_URL) {
-      // Simulação: Apenas simula que a busca foi um sucesso e retorna o MOCK_DB
-      // Na prática, se REMOTE_API_URL é vazio, não há sync.
-      console.log('Sincronização realizada com sucesso (Simulado).');
-      return {
-        tables: TABLES_METADATA,
-        db: MOCK_DB, 
-        lastUpdate: new Date().toISOString()
-      };
-    }
-
     try {
-      console.log('Buscando atualizações...');
-      const response = await fetch(REMOTE_API_URL);
+      console.log('Buscando atualizações no GitHub...');
+      // Adicione um timestamp para evitar cache do próprio fetch/network
+      const response = await fetch(`${REMOTE_API_URL}?t=${new Date().getTime()}`);
       const apiResult = await response.json();
       
+      // IMPORTANTE: O JSON do GitHub deve ter a estrutura { metadata: [], data: {} }
       const { metadata, data } = apiResult;
 
       if (!data || !metadata) throw new Error("Formato de JSON inválido");
 
-      // Salva no celular para a próxima vez
       await AsyncStorage.setItem(STORAGE_KEY_DB, JSON.stringify(data));
       await AsyncStorage.setItem(STORAGE_KEY_META, JSON.stringify(metadata));
       await AsyncStorage.setItem(STORAGE_KEY_DATE, new Date().toISOString());
       
+      // ATUALIZA O REPOSITÓRIO COM O DADO NOVO
+      setDatabase(data);
+
       console.log('Dados atualizados da nuvem com sucesso.');
       return {
         tables: metadata,
@@ -84,7 +83,7 @@ export const DataService = {
       };
 
     } catch (error) {
-      console.log('Sem internet ou API indisponível. Mantendo dados atuais.');
+      console.log('Erro ao buscar remoto:', error);
       return null;
     }
   }

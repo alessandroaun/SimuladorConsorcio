@@ -10,60 +10,70 @@ import TableSelectionScreen from './src/screens/TableSelectionScreen';
 import SimulationFormScreen from './src/screens/SimulationFormScreen';
 import ResultScreen from './src/screens/ResultScreen';
 
-// Importação do Serviço de Dados
+// Importação do Serviço de Dados e do Repository Setter
 import { DataService, AppData } from './src/services/DataService';
+import { setDatabase } from './data/TableRepository'; // <--- IMPORTANTE
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
-  // Estado para guardar os dados que vamos usar no app inteiro
   const [appData, setAppData] = useState<AppData | null>(null);
 
   useEffect(() => {
     const load = async () => {
-      let initialData: AppData;
+      let initialData: AppData | null = null;
       
       try {
-        // 1. Inicializa os dados (Prioridade: Cache do Celular > Arquivo Local Mock)
-        // Isso carrega a versão atual dos dados para renderização inicial rápida
+        // 1. Inicializa os dados (Cache Local ou Mock)
         initialData = await DataService.initialize();
-        setAppData(initialData);
+        
+        if (initialData) {
+          setAppData(initialData);
+          
+          // --- CORREÇÃO CRÍTICA ---
+          // Injeta os dados carregados no Repository para que as telas 
+          // que usam getTableData() vejam os dados corretos.
+          setDatabase(initialData.db);
+        }
+
       } catch (error) {
         console.error("Erro fatal ao carregar dados iniciais:", error);
-        return; 
+        // Mesmo com erro, remove loading para não travar app (opcional)
       } finally {
-        // Remove a tela de loading assim que tivermos qualquer dado válido
         setIsLoading(false);
       }
 
-      // 2. Tenta atualizar em segundo plano (Sync com GitHub/API)
+      // 2. Tenta atualizar em segundo plano (Sync com GitHub)
+      // Se der erro aqui, não tem problema, pois já temos o initialData rodando
       const updatedData = await DataService.syncWithRemote();
       
       if (updatedData) {
-         // **CORREÇÃO CRÍTICA:** Se a sincronização trouxer dados novos,
-         // atualizamos o estado 'appData' imediatamente.
          setAppData(updatedData);
-         console.log("Interface atualizada com dados mais recentes.");
+         
+         // --- CORREÇÃO CRÍTICA ---
+         // Se baixou coisa nova, atualiza o Repository global novamente
+         setDatabase(updatedData.db);
+         
+         console.log("Interface e Repositório atualizados com dados da nuvem.");
       }
     };
 
     load();
   }, []);
 
-  // Tela de Splash (Aparece enquanto o DataService.initialize roda)
+  // Tela de Loading
   if (isLoading || !appData) {
     return (
       <View style={styles.loadingContainer}>
         <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
         <ActivityIndicator size="large" color="#0F172A" />
         <Text style={styles.loadingText}>Carregando tabelas...</Text>
-        <Text style={styles.loadingSubText}>Verificando atualizações</Text>
+        <Text style={styles.loadingSubText}>Verificando atualizações...</Text>
       </View>
     );
   }
 
-  // Navegação principal, que só é renderizada depois que os dados (appData) estiverem prontos
   return (
     <NavigationContainer>
       <Stack.Navigator 
@@ -73,7 +83,7 @@ export default function App() {
         <Stack.Screen 
           name="Home" 
           component={HomeScreen} 
-          // Correção: Passamos as tabelas carregadas (que agora podem ser as recém-atualizadas)
+          // Passa os metadados das tabelas (lista de categorias/nomes)
           initialParams={{ tables: appData.tables }} 
         />
         
