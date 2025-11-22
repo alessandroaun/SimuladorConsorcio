@@ -1,14 +1,13 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, TextInput, SafeAreaView, Alert, Switch, Modal } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { ArrowLeft, Calculator, DollarSign, ShieldCheck, CheckCircle2 } from 'lucide-react-native';
+import { ArrowLeft, Calculator, DollarSign, ShieldCheck, Lock } from 'lucide-react-native';
 import { RootStackParamList } from '../types/navigation';
 import { getTableData } from '../../data/TableRepository';
 import { ConsortiumCalculator, SimulationInput, InstallmentType } from '../utils/ConsortiumCalculator';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'SimulationForm'>;
 
-// Opções de Adesão
 const ADESAO_OPTIONS = [
   { label: 'Isento', value: 0 },
   { label: '0.5%', value: 0.005 },
@@ -24,14 +23,14 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
   const [creditoInput, setCreditoInput] = useState('');
   const [prazoIdx, setPrazoIdx] = useState<number | null>(null);
   const [tipoParcela, setTipoParcela] = useState<InstallmentType>('S/SV');
-  
-  // NOVO STATE: Adesão
   const [adesaoPct, setAdesaoPct] = useState(0);
   
   // Lance States
   const [showLanceModal, setShowLanceModal] = useState(false);
-  const [lanceBolso, setLanceBolso] = useState('0');
-  const [lanceEmbPct, setLanceEmbPct] = useState(0);
+  
+  // Agora controlamos o lance embutido por Valor Monetário (string para input)
+  const [lanceEmbInput, setLanceEmbInput] = useState(''); 
+  const [lanceBolso, setLanceBolso] = useState('');
 
   // Helpers
   const availableCredits = useMemo(() => rawData.map(r => r.credito).sort((a,b) => a-b), [rawData]);
@@ -57,6 +56,35 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
     }
   }, [isSeguroObrigatorio]);
 
+  // Limpa lances se trocar o crédito para evitar inconsistências
+  useEffect(() => {
+    setLanceEmbInput('');
+    setLanceBolso('');
+  }, [creditoInput]);
+
+  // --- Lógica do Modal de Lances ---
+  const maxLancePermitido = selectedRow ? selectedRow.credito * 0.25 : 0;
+
+  const handleChangeLanceEmbutido = (text: string) => {
+    // Permite apenas números
+    const numericValue = parseFloat(text) || 0;
+    
+    if (numericValue > maxLancePermitido) {
+      // Se passar do limite, trava no máximo
+      setLanceEmbInput(maxLancePermitido.toFixed(2));
+      Alert.alert("Limite Atingido", `O lance embutido máximo é de 25% (${maxLancePermitido.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}).`);
+    } else {
+      setLanceEmbInput(text);
+    }
+  };
+
+  const handleQuickLanceSelect = (pct: number) => {
+    if (!selectedRow) return;
+    const val = selectedRow.credito * pct;
+    setLanceEmbInput(val.toFixed(2)); // Preenche o input com o valor calculado
+  };
+  // ---------------------------------
+
   const handleCalculate = () => {
     if (!selectedRow || prazoIdx === null) {
       Alert.alert("Dados incompletos", "Por favor, selecione um crédito válido e um prazo.");
@@ -77,15 +105,19 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
        return;
     }
 
+    // Converte o valor digitado (R$) de volta para porcentagem para a calculadora
+    const lanceEmbValor = parseFloat(lanceEmbInput) || 0;
+    const lanceEmbPctCalculado = lanceEmbValor / selectedRow.credito;
+
     const input: SimulationInput = {
       tableId: table.id,
       credito: selectedRow.credito,
       prazo: prazoObj.prazo,
       tipoParcela,
       lanceBolso: parseFloat(lanceBolso) || 0,
-      lanceEmbutidoPct: lanceEmbPct,
+      lanceEmbutidoPct: lanceEmbPctCalculado, // Envia a % calculada
       lanceCartaVal: 0,
-      taxaAdesaoPct: adesaoPct // Passa o valor selecionado
+      taxaAdesaoPct: adesaoPct 
     };
 
     const error = ConsortiumCalculator.validate(input, table);
@@ -97,6 +129,8 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
     const result = ConsortiumCalculator.calculate(input, table, rawParcela);
     navigation.navigate('Result', { result, input });
   };
+
+  const formatCurrency = (val: number) => val.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'});
 
   return (
     <SafeAreaView style={styles.container}>
@@ -148,7 +182,7 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
           </View>
         </View>
 
-        {/* TAXA DE ADESÃO (NOVO BLOCO) */}
+        {/* TAXA DE ADESÃO */}
         <View style={styles.card}>
           <Text style={styles.label}>Taxa de Adesão (1ª Parcela)</Text>
           <View style={styles.pillsContainer}>
@@ -199,13 +233,27 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
         </View>
 
         {/* LANCES BUTTON */}
-        <TouchableOpacity style={styles.lanceBtn} onPress={() => setShowLanceModal(true)}>
+        <TouchableOpacity 
+          // Desabilita se não tiver crédito selecionado
+          style={[styles.lanceBtn, !selectedRow && styles.lanceBtnDisabled]} 
+          onPress={() => {
+            if (selectedRow) setShowLanceModal(true);
+            else Alert.alert("Atenção", "Selecione um valor de crédito primeiro.");
+          }}
+          activeOpacity={selectedRow ? 0.7 : 1}
+        >
           <View style={{flexDirection:'row', alignItems:'center'}}>
-            <DollarSign color="#0F172A" size={20} />
-            <Text style={styles.lanceBtnText}>Configurar Lances</Text>
+            {selectedRow ? (
+               <DollarSign color="#0F172A" size={20} />
+            ) : (
+               <Lock color="#94A3B8" size={20} />
+            )}
+            <Text style={[styles.lanceBtnText, !selectedRow && {color: '#94A3B8'}]}>
+              Configurar Lances
+            </Text>
           </View>
           <Text style={styles.lanceBtnValue}>
-            {lanceEmbPct > 0 || parseFloat(lanceBolso) > 0 ? 'Ativo' : 'Opcional'}
+            {(parseFloat(lanceEmbInput) > 0 || parseFloat(lanceBolso) > 0) ? 'Ativo' : 'Opcional'}
           </Text>
         </TouchableOpacity>
 
@@ -215,23 +263,43 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
         </TouchableOpacity>
       </ScrollView>
 
-      {/* MODAL DE LANCES (Mantido igual) */}
+      {/* MODAL DE LANCES */}
       <Modal visible={showLanceModal} animationType="slide" presentationStyle="pageSheet">
         <View style={styles.modalContainer}>
           <Text style={styles.modalTitle}>Configurar Lances</Text>
-          <Text style={styles.label}>Lance Embutido ({Math.round(lanceEmbPct*100)}%)</Text>
+          
+          {/* INPUT DE LANCE EMBUTIDO */}
           <View style={styles.rowBetween}>
+            <Text style={styles.label}>Lance Embutido (R$)</Text>
+            {/* Aviso de limite ao lado da label */}
+            <Text style={styles.limitText}>
+              Máx: {formatCurrency(maxLancePermitido)} (25%)
+            </Text>
+          </View>
+          
+          <TextInput 
+            style={styles.input} 
+            keyboardType="numeric" 
+            value={lanceEmbInput}
+            onChangeText={handleChangeLanceEmbutido}
+            placeholder="0.00"
+          />
+          
+          {/* BOTÕES RÁPIDOS */}
+          <View style={styles.quickBtnContainer}>
+             <Text style={styles.quickLabel}>Seleção Rápida:</Text>
              {[0, 0.10, 0.25].map(pct => (
                <TouchableOpacity 
                 key={pct} 
-                style={[styles.pctBtn, lanceEmbPct === pct && styles.pctBtnActive]}
-                onPress={() => setLanceEmbPct(pct)}
+                style={styles.quickBtn}
+                onPress={() => handleQuickLanceSelect(pct)}
                >
-                 <Text style={[styles.pctText, lanceEmbPct === pct && styles.pctTextActive]}>{pct*100}%</Text>
+                 <Text style={styles.quickBtnText}>{pct*100}%</Text>
                </TouchableOpacity>
              ))}
           </View>
           <Text style={styles.helperText}>Desconta do crédito para facilitar a contemplação.</Text>
+
           <Text style={[styles.label, {marginTop: 24}]}>Lance do Bolso (R$)</Text>
           <TextInput 
             style={styles.input} 
@@ -240,6 +308,7 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
             onChangeText={setLanceBolso}
             placeholder="0.00"
           />
+
           <TouchableOpacity style={[styles.mainBtn, {marginTop: 40}]} onPress={() => setShowLanceModal(false)}>
             <Text style={styles.mainBtnText}>CONFIRMAR LANCES</Text>
           </TouchableOpacity>
@@ -268,19 +337,27 @@ const styles = StyleSheet.create({
   pillTextActive: { color: '#fff', fontWeight: 'bold' },
   helperText: { fontSize: 12, color: '#64748B', marginTop: 4 },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  
+  // Botão de Lance e Estado Desabilitado
   lanceBtn: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#fff', padding: 16, borderRadius: 12, marginBottom: 24, alignItems: 'center', borderWidth: 1, borderColor: '#E2E8F0' },
+  lanceBtnDisabled: { backgroundColor: '#F1F5F9', borderColor: '#E2E8F0', opacity: 0.7 },
   lanceBtnText: { marginLeft: 12, fontSize: 16, fontWeight: '500', color: '#0F172A' },
   lanceBtnValue: { color: '#64748B' },
+  
   mainBtn: { backgroundColor: '#0F172A', borderRadius: 12, padding: 16, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
   mainBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
   modalContainer: { flex: 1, padding: 24, backgroundColor: '#fff' },
   modalTitle: { fontSize: 22, fontWeight: 'bold', marginBottom: 32, textAlign: 'center', color: '#0F172A' },
-  pctBtn: { flex: 1, alignItems: 'center', padding: 12, borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 8, marginHorizontal: 4 },
-  pctBtnActive: { backgroundColor: '#0F172A', borderColor: '#0F172A' },
-  pctText: { fontWeight: '600', color: '#334155' },
-  pctTextActive: { color: '#fff' },
+  
   mandatoryContainer: { backgroundColor: '#F0F9FF', borderRadius: 8, padding: 12, borderLeftWidth: 4, borderLeftColor: '#0EA5E9' },
   mandatoryHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   mandatoryTitle: { fontSize: 16, fontWeight: 'bold', color: '#0369A1', marginLeft: 8 },
-  mandatoryText: { fontSize: 14, color: '#334155', lineHeight: 20 }
+  mandatoryText: { fontSize: 14, color: '#334155', lineHeight: 20 },
+
+  // Novos Estilos para o Modal de Lances Atualizado
+  limitText: { fontSize: 12, color: '#DC2626', fontWeight: '600', backgroundColor: '#FEF2F2', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, marginBottom: 8 },
+  quickBtnContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 12, gap: 8 },
+  quickLabel: { fontSize: 14, color: '#64748B', marginRight: 4 },
+  quickBtn: { backgroundColor: '#E2E8F0', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
+  quickBtnText: { color: '#334155', fontWeight: '600', fontSize: 12 }
 });
