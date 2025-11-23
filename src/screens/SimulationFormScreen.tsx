@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, TextInput, SafeAreaView, Alert, Switch, Modal, KeyboardAvoidingView, Platform, Dimensions } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { ArrowLeft, Calculator, DollarSign, ShieldCheck, Lock, Car, CalendarDays, PieChart, AlertTriangle, Percent } from 'lucide-react-native'; // Removido Minus, Plus, Zap
+import { ArrowLeft, Calculator, DollarSign, ShieldCheck, Lock, Car, CalendarDays, PieChart, AlertTriangle, Percent, ChevronDown } from 'lucide-react-native';
 import { RootStackParamList } from '../types/navigation';
 import { getTableData } from '../../data/TableRepository';
 import { ConsortiumCalculator, SimulationInput, InstallmentType } from '../utils/ConsortiumCalculator';
@@ -26,8 +26,9 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
   const [adesaoPct, setAdesaoPct] = useState(0);
   const [mesContemplacaoInput, setMesContemplacaoInput] = useState(''); 
 
-  // --- STATES DE LANCES ---
+  // --- STATES DE MODAL E LANCES ---
   const [showLanceModal, setShowLanceModal] = useState(false);
+  const [showCreditModal, setShowCreditModal] = useState(false); // NOVO STATE PARA MODAL DE CRÉDITO
   const [lanceEmbInput, setLanceEmbInput] = useState(''); 
   const [lanceBolso, setLanceBolso] = useState('');
   const [lanceCartaInput, setLanceCartaInput] = useState('');
@@ -41,6 +42,7 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
   const percentualLanceParaPrazo = parseFloat(pctParaPrazoInput) || 0;
 
   // --- HELPERS ---
+  // Obtém e ordena os créditos disponíveis da tabela
   const availableCredits = useMemo(() => rawData.map(r => r.credito).sort((a,b) => a-b), [rawData]);
   
   const selectedRow = useMemo(() => {
@@ -69,13 +71,15 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
     if (isSeguroObrigatorio) setTipoParcela('C/SV');
   }, [isSeguroObrigatorio]);
 
+  // Limpa estados dependentes quando o crédito é alterado
   useEffect(() => {
+    setPrazoIdx(null); // Limpa prazo
     setLanceEmbInput('');
     setLanceBolso('');
     setLanceCartaInput('');
   }, [creditoInput]);
   
-  // --- FUNÇÕES DE LANCE EMBUTIDO (CORREÇÃO DE ERRO) ---
+  // --- FUNÇÕES DE LANCE EMBUTIDO ---
   const maxLancePermitido = selectedRow ? selectedRow.credito * table.maxLanceEmbutido : 0;
   
   const handleChangeLanceEmbutido = (text: string) => {
@@ -91,7 +95,6 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
   const handleQuickLanceSelect = (pct: number) => {
     if (!selectedRow) return;
     const val = selectedRow.credito * pct;
-    // Opcionalmente, pode-se limitar este valor aqui também, mas se a opção for < maxLanceEmbutido, não é necessário.
     if (pct <= table.maxLanceEmbutido) {
         setLanceEmbInput(val.toFixed(2));
     } else {
@@ -103,19 +106,15 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
 
   // --- LÓGICA DE SINCRONIZAÇÃO E VALIDAÇÃO DE PERCENTUAIS ---
 
-  // Efeito para sincronizar os dois inputs de percentual (Prazo vs Parcela)
   useEffect(() => {
-    // Garante que a soma seja sempre 100%
     const pctParcela = parseFloat(pctParaParcelaInput) || 0;
     const pctPrazo = parseFloat(pctParaPrazoInput) || 0;
 
     if (pctParcela + pctPrazo !== 100) {
-        // Se o input de Parcela for alterado, atualiza o Prazo
         if (pctParaParcelaInput !== '' && pctParaParcelaInput !== '100' && pctParaParcelaInput !== '0') {
             const newPrazo = Math.min(100, Math.max(0, 100 - pctParcela));
             setPctParaPrazoInput(newPrazo.toString());
         } 
-        // Se o input de Prazo for alterado, atualiza a Parcela
         else if (pctParaPrazoInput !== '' && pctParaPrazoInput !== '100' && pctParaPrazoInput !== '0') {
             const newParcela = Math.min(100, Math.max(0, 100 - pctPrazo));
             setPctParaParcelaInput(newParcela.toString());
@@ -123,7 +122,6 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
     }
   }, [pctParaParcelaInput, pctParaPrazoInput]);
 
-  // Handler para garantir que o input seja numérico e limitado a 100
   const handlePercentualChange = (text: string, type: 'parcela' | 'prazo') => {
     const numericValue = parseFloat(text.replace(/[^0-9.]/g, '')) || 0;
     
@@ -141,7 +139,7 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
 
     if (type === 'parcela') {
       setPctParaParcelaInput(text);
-      if (text === '') { // Se limpar, reseta para 0/100
+      if (text === '') {
           setPctParaPrazoInput('100');
       } else {
           const newPrazo = Math.min(100, Math.max(0, 100 - numericValue));
@@ -149,7 +147,7 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
       }
     } else { // type === 'prazo'
       setPctParaPrazoInput(text);
-      if (text === '') { // Se limpar, reseta para 100/0
+      if (text === '') {
           setPctParaParcelaInput('0');
       } else {
           const newParcela = Math.min(100, Math.max(0, 100 - numericValue));
@@ -159,39 +157,60 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
   };
 
 
-  // --- CÁLCULOS DE LANCES ---
+  // --- CÁLCULOS DE LANCES E VALIDAÇÃO ---
   const currentCredito = selectedRow ? selectedRow.credito : 0;
-  
   const currentLanceEmb = parseFloat(lanceEmbInput) || 0;
   const currentLanceBolso = parseFloat(lanceBolso) || 0;
   const currentLanceCarta = parseFloat(lanceCartaInput) || 0;
   const totalLances = currentLanceEmb + currentLanceBolso + currentLanceCarta;
   const totalLancePct = currentCredito > 0 ? (totalLances / currentCredito) * 100 : 0;
 
-  // --- VALIDAÇÃO DE REDUÇÃO (40%) ---
   const limitInfo = useMemo(() => {
     const pctParaParcela = parseFloat(pctParaParcelaInput) || 0;
 
-    if (!currentParcelaValue || prazoIdx === null || totalLances === 0 || pctParaParcela === 0) {
-        return { isValid: true, message: '' };
+    if (!currentParcelaValue || prazoIdx === null || totalLances === 0) {
+        return { isValid: true, message: '', maxPermittedPct: 100 };
     }
 
     const prazoTotal = availablePrazos[prazoIdx].prazo;
     const mesPrevisto = parseInt(mesContemplacaoInput) || 1;
     const prazoRestante = Math.max(1, prazoTotal - mesPrevisto); 
     
-    const valorParaParcela = totalLances * (pctParaParcela / 100);
-    const reducaoMensal = valorParaParcela / prazoRestante;
-    const novaParcela = currentParcelaValue - reducaoMensal;
-    const limiteMinimo = currentParcelaValue * 0.60;
-
-    const isValid = novaParcela >= limiteMinimo;
+    const maxReductionValuePerMonth = currentParcelaValue * 0.40; 
+    const totalReductionCapacity = maxReductionValuePerMonth * prazoRestante; 
+    let maxPermittedPct = (totalReductionCapacity / totalLances) * 100;
+    maxPermittedPct = Math.min(100, maxPermittedPct); 
+    
+    const isValid = pctParaParcela <= maxPermittedPct + 0.01;
+    const message = !isValid 
+        ? `Redução excessiva! O máximo permitido é ${Math.floor(maxPermittedPct)}% do lance, respeitando o limite de 40% da parcela.` 
+        : '';
 
     return { 
         isValid, 
-        message: !isValid ? `Redução excessiva! O máximo permitido para abater na parcela é até 40% (aprox. R$ ${(currentParcelaValue - limiteMinimo).toFixed(2)}/mês).` : ''
+        message, 
+        maxPermittedPct: Math.floor(maxPermittedPct)
     };
   }, [percentualLanceParaParcela, totalLances, currentParcelaValue, prazoIdx, mesContemplacaoInput, availablePrazos]);
+
+  const handleSetMaxPct = () => {
+    if (totalLances === 0 || prazoIdx === null) {
+        Alert.alert("Atenção", "Preencha o crédito, prazo e lances para calcular o máximo permitido.");
+        return;
+    }
+    const maxPct = limitInfo.maxPermittedPct;
+    const newPrazoPct = 100 - maxPct;
+    setPctParaParcelaInput(maxPct.toString());
+    setPctParaPrazoInput(newPrazoPct.toString());
+  };
+
+  // --- FUNÇÃO PARA ATUALIZAR CRÉDITO NO MODAL ---
+  const handleSelectCredit = (value: number) => {
+    setCreditoInput(value.toString());
+    setShowCreditModal(false);
+  };
+  // ---------------------------------------------
+
 
   // Função principal de cálculo
   const handleCalculate = () => {
@@ -218,7 +237,7 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
       tipoParcela,
       lanceBolso: parseFloat(lanceBolso) || 0,
       lanceEmbutidoPct: lanceEmbPctCalculado,
-      lanceCartaVal: parseFloat(lanceCartaInput) || 0, // Adicionado lanceCartaInput para completar o input
+      lanceCartaVal: parseFloat(lanceCartaInput) || 0,
       percentualLanceParaParcela, 
       taxaAdesaoPct: adesaoPct,
       mesContemplacao: parseInt(mesContemplacaoInput) || 0
@@ -246,26 +265,18 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* 1. VALOR DO CRÉDITO */}
+        {/* 1. VALOR DO CRÉDITO (SUBSTITUÍDO PELO SELECTOR) */}
         <View style={styles.card}>
           <Text style={styles.label}>Valor do Crédito (R$)</Text>
-          <TextInput 
-            style={styles.input} 
-            keyboardType="numeric" 
-            placeholder="Ex: 100000" 
-            value={creditoInput}
-            onChangeText={setCreditoInput}
-            placeholderTextColor="#94A3B8"
-          />
-          {!selectedRow && availableCredits.length > 0 && (
-            <View style={styles.chipContainer}>
-              {availableCredits.slice(0, 6).map((c) => (
-                <TouchableOpacity key={c} onPress={() => setCreditoInput(c.toString())} style={styles.chip}>
-                  <Text style={styles.chipText}>{c >= 1000 ? (c/1000).toFixed(0)+'k' : c}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
+          <TouchableOpacity 
+            style={styles.selectInput}
+            onPress={() => setShowCreditModal(true)}
+          >
+            <Text style={creditoInput ? styles.selectText : styles.selectPlaceholder}>
+              {creditoInput ? formatCurrency(parseFloat(creditoInput)) : 'Selecione o valor do crédito'}
+            </Text>
+            <ChevronDown color="#94A3B8" size={20} />
+          </TouchableOpacity>
         </View>
 
         {/* 2. PRAZO */}
@@ -277,31 +288,40 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
                 key={idx} 
                 style={[styles.pill, idx === prazoIdx && styles.pillActive]}
                 onPress={() => setPrazoIdx(idx)}
+                disabled={!creditoInput}
               >
                 <Text style={[styles.pillText, idx === prazoIdx && styles.pillTextActive]}>{p.prazo}x</Text>
               </TouchableOpacity>
             )) : (
-              <Text style={styles.helperText}>Digite um crédito válido para ver os prazos.</Text>
+              <Text style={styles.helperText}>Selecione um crédito válido para ver os prazos.</Text>
             )}
           </View>
         </View>
-
-        {/* 3. PREVISÃO DE CONTEMPLAÇÃO */}
-        <View style={styles.card}>
-           <View style={styles.rowBetween}>
-             <Text style={styles.label}>Previsão de Contemplação (Mês)</Text>
-             <CalendarDays color="#64748B" size={20} />
-           </View>
-           <TextInput 
-             style={styles.input} 
-             keyboardType="numeric" 
-             placeholder="Ex: 4 (Padrão: 1º mês)" 
-             value={mesContemplacaoInput}
-             onChangeText={setMesContemplacaoInput}
-             placeholderTextColor="#94A3B8"
-           />
-           <Text style={styles.helperText}>Informe em qual mês planeja ser contemplado.</Text>
-        </View>
+        
+        {/* 3. BOTÃO DE CONFIGURAR LANCES */}
+        <TouchableOpacity 
+          style={[styles.lanceBtn, !selectedRow && styles.lanceBtnDisabled]} 
+          onPress={() => {
+            if (selectedRow) setShowLanceModal(true);
+            else Alert.alert("Atenção", "Selecione um valor de crédito primeiro.");
+          }}
+          activeOpacity={selectedRow ? 0.7 : 1}
+          disabled={!creditoInput} // Desabilita se não houver crédito selecionado
+        >
+          <View style={{flexDirection:'row', alignItems:'center'}}>
+            {selectedRow ? (
+               <DollarSign color="#0F172A" size={20} />
+            ) : (
+               <Lock color="#94A3B8" size={20} />
+            )}
+            <Text style={[styles.lanceBtnText, !selectedRow && {color: '#94A3B8'}]}>
+              Configurar Lances
+            </Text>
+          </View>
+          <Text style={styles.lanceBtnValue}>
+            {totalLances > 0 ? `${totalLancePct.toFixed(1)}% (Total)` : 'Opcional'}
+          </Text>
+        </TouchableOpacity>
 
         {/* 4. TAXA DE ADESÃO */}
         <View style={styles.card}>
@@ -320,7 +340,7 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
             ))}
           </View>
         </View>
-
+        
         {/* 5. SEGURO TOGGLE */}
         <View style={styles.card}>
           {isSeguroObrigatorio ? (
@@ -347,29 +367,24 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
           )}
         </View>
 
-        {/* BOTÃO DE CONFIGURAR LANCES */}
-        <TouchableOpacity 
-          style={[styles.lanceBtn, !selectedRow && styles.lanceBtnDisabled]} 
-          onPress={() => {
-            if (selectedRow) setShowLanceModal(true);
-            else Alert.alert("Atenção", "Selecione um valor de crédito primeiro.");
-          }}
-          activeOpacity={selectedRow ? 0.7 : 1}
-        >
-          <View style={{flexDirection:'row', alignItems:'center'}}>
-            {selectedRow ? (
-               <DollarSign color="#0F172A" size={20} />
-            ) : (
-               <Lock color="#94A3B8" size={20} />
-            )}
-            <Text style={[styles.lanceBtnText, !selectedRow && {color: '#94A3B8'}]}>
-              Configurar Lances
-            </Text>
-          </View>
-          <Text style={styles.lanceBtnValue}>
-            {totalLances > 0 ? `${totalLancePct.toFixed(1)}% (Total)` : 'Opcional'}
-          </Text>
-        </TouchableOpacity>
+
+        {/* 6. PREVISÃO DE CONTEMPLAÇÃO */}
+        <View style={styles.card}>
+           <View style={styles.rowBetween}>
+             <Text style={styles.label}>Previsão de Contemplação (Mês)</Text>
+             <CalendarDays color="#64748B" size={20} />
+           </View>
+           <TextInput 
+             style={styles.input} 
+             keyboardType="numeric" 
+             placeholder="Ex: 4 (Padrão: 1º mês)" 
+             value={mesContemplacaoInput}
+             onChangeText={setMesContemplacaoInput}
+             placeholderTextColor="#94A3B8"
+           />
+           <Text style={styles.helperText}>Informe em qual mês planeja ser contemplado.</Text>
+        </View>
+
 
         {/* BOTÃO CALCULAR */}
         <TouchableOpacity style={styles.mainBtn} onPress={handleCalculate} disabled={!limitInfo.isValid}>
@@ -378,8 +393,47 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
         </TouchableOpacity>
       </ScrollView>
 
+      {/* --- MODAL DE SELEÇÃO DE CRÉDITO (NOVO) --- */}
+      <Modal
+        visible={showCreditModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowCreditModal(false)}
+      >
+        <SafeAreaView style={styles.modalContainer}>
+          <Text style={styles.modalTitle}>Selecione o Crédito</Text>
+          <ScrollView contentContainerStyle={{ padding: 20 }}>
+            {availableCredits.map((credit, index) => (
+              <TouchableOpacity
+                key={index}
+                style={[
+                  styles.creditOption,
+                  parseFloat(creditoInput) === credit && styles.creditOptionActive,
+                ]}
+                onPress={() => handleSelectCredit(credit)}
+              >
+                <Text style={parseFloat(creditoInput) === credit ? styles.creditTextActive : styles.creditText}>
+                  {formatCurrency(credit)}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+          <TouchableOpacity 
+            style={[styles.mainBtn, {margin: 20}]}
+            onPress={() => setShowCreditModal(false)}
+          >
+            <Text style={styles.mainBtnText}>FECHAR</Text>
+          </TouchableOpacity>
+        </SafeAreaView>
+      </Modal>
+
       {/* --- MODAL DE LANCES --- */}
-      <Modal visible={showLanceModal} animationType="slide" presentationStyle="pageSheet">
+      <Modal 
+        visible={showLanceModal} 
+        animationType="slide" 
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowLanceModal(false)}
+      >
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalContainer}>
           <Text style={styles.modalTitle}>Configurar Lances</Text>
           
@@ -389,7 +443,6 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
             <View style={styles.inputGroup}>
                 <View style={styles.rowBetween}>
                     <Text style={styles.label}>Lance Embutido (R$)</Text>
-                    {/* Max Lance Permitido agora vem de um cálculo corrigido */}
                     <Text style={styles.limitText}>Máx: {formatCurrency(maxLancePermitido)} ({ (table.maxLanceEmbutido * 100).toFixed(0) }%)</Text>
                 </View>
                 <TextInput 
@@ -441,7 +494,7 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
                  <PieChart color="#0F172A" size={20} />
                </View>
                
-               <Text style={styles.helperText}>A soma dos percentuais deve ser 100%.</Text>
+               <Text style={styles.helperText}>A soma dos percentuais deve ser 100%. Máx. 40% de redução na parcela.</Text>
 
                <View style={styles.percentInputRow}>
                    {/* INPUT PERCENTUAL PARA PRAZO */}
@@ -472,6 +525,17 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
                            />
                            <Percent size={18} color="#64748B" style={styles.percentIcon} />
                        </View>
+                       {/* BOTÃO DE MÁXIMO PERMITIDO */}
+                       {totalLances > 0 && (
+                            <TouchableOpacity 
+                                style={styles.maxPctButton} 
+                                onPress={handleSetMaxPct}
+                            >
+                                <Text style={styles.maxPctButtonText}>
+                                    Usar Máx. ({limitInfo.maxPermittedPct}%)
+                                </Text>
+                            </TouchableOpacity>
+                       )}
                    </View>
                </View>
                
@@ -544,6 +608,22 @@ const styles = StyleSheet.create({
   scrollContent: { padding: 16, paddingBottom: 40 },
   card: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#E2E8F0' },
   label: { fontSize: 14, fontWeight: '600', color: '#0F172A', marginBottom: 8 },
+  
+  // NOVO ESTILO PARA O INPUT DE SELEÇÃO
+  selectInput: { 
+    backgroundColor: '#F1F5F9', 
+    borderRadius: 8, 
+    padding: 16, 
+    borderWidth: 1, 
+    borderColor: '#CBD5E1', 
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    minHeight: 50,
+  },
+  selectText: { fontSize: 18, color: '#0F172A', fontWeight: 'bold' },
+  selectPlaceholder: { fontSize: 18, color: '#94A3B8' },
+  
   input: { backgroundColor: '#F1F5F9', borderRadius: 8, padding: 12, fontSize: 18, borderWidth: 1, borderColor: '#CBD5E1', color: '#0F172A' },
   chipContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
   chip: { backgroundColor: '#E0F2FE', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
@@ -556,9 +636,24 @@ const styles = StyleSheet.create({
   helperText: { fontSize: 12, color: '#64748B', marginTop: 4 },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   
-  lanceBtn: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#fff', padding: 16, borderRadius: 12, marginBottom: 24, alignItems: 'center', borderWidth: 1, borderColor: '#E2E8F0' },
-  lanceBtnDisabled: { backgroundColor: '#F1F5F9', borderColor: '#E2E8F0', opacity: 0.7 },
-  lanceBtnText: { marginLeft: 12, fontSize: 16, fontWeight: '500', color: '#0F172A' },
+  lanceBtn: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    backgroundColor: '#fff', 
+    padding: 16, 
+    borderRadius: 12, 
+    marginBottom: 16,
+    alignItems: 'center', 
+    borderWidth: 2,
+    borderColor: '#0EA5E9',
+    shadowColor: '#0EA5E9',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  lanceBtnDisabled: { backgroundColor: '#F1F5F9', borderColor: '#E2E8F0', opacity: 0.7, shadowColor: 'transparent', elevation: 0 },
+  lanceBtnText: { marginLeft: 12, fontSize: 16, fontWeight: '700', color: '#0F172A' },
   lanceBtnValue: { color: '#0F172A', fontWeight: 'bold' },
   
   mainBtn: { backgroundColor: '#0F172A', borderRadius: 12, padding: 16, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
@@ -584,7 +679,6 @@ const styles = StyleSheet.create({
   summaryLabel: { fontSize: 16, color: '#64748B' },
   summaryValue: { fontSize: 18, fontWeight: 'bold', color: '#0F172A' },
 
-  // ESTILOS DOS NOVOS INPUTS DE PERCENTUAL
   percentInputRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 16, marginTop: 8 },
   percentInputBox: { flex: 1 },
   percentLabel: { fontSize: 12, color: '#64748B', marginBottom: 4, fontWeight: '500' },
@@ -593,9 +687,45 @@ const styles = StyleSheet.create({
   percentIcon: { position: 'absolute', right: 12 },
   errorInput: { borderColor: '#EF4444', borderWidth: 2 },
   
+  maxPctButton: { 
+    backgroundColor: '#E0F2FE', 
+    paddingHorizontal: 10, 
+    paddingVertical: 5, 
+    borderRadius: 8, 
+    marginTop: 8,
+    alignSelf: 'flex-start'
+  },
+  maxPctButtonText: { 
+    color: '#0284C7', 
+    fontWeight: 'bold', 
+    fontSize: 12 
+  },
+  
   allocationSummary: { marginTop: 16, backgroundColor: '#F0FDF4', padding: 12, borderRadius: 8, borderTopWidth: 1, borderTopColor: '#DCFCE7' },
   allocationError: { backgroundColor: '#FEF2F2', borderColor: '#FECACA' },
   allocText: { fontSize: 14, color: '#166534' },
   errorBox: { flexDirection: 'row', gap: 8, marginTop: 8, alignItems: 'center', padding: 4 },
-  errorText: { color: '#EF4444', fontSize: 13, flex: 1, fontWeight: '600' }
+  errorText: { color: '#EF4444', fontSize: 13, flex: 1, fontWeight: '600' },
+
+  // ESTILOS DO NOVO MODAL DE CRÉDITO
+  creditOption: { 
+    padding: 15, 
+    borderBottomWidth: 1, 
+    borderBottomColor: '#E2E8F0', 
+    backgroundColor: '#fff',
+  },
+  creditOptionActive: {
+    backgroundColor: '#EFF6FF',
+    borderLeftWidth: 4,
+    borderLeftColor: '#3B82F6',
+  },
+  creditText: {
+    fontSize: 16,
+    color: '#0F172A',
+  },
+  creditTextActive: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#3B82F6',
+  }
 });

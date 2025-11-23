@@ -12,9 +12,7 @@ export interface SimulationInput {
   lanceCartaVal: number;
   taxaAdesaoPct: number;
   
-  // NOVO CAMPO: Substitui os enums antigos.
   // Define a INTENÇÃO do usuário: Quanto % do lance ele QUER usar para reduzir parcela.
-  // O sistema tentará usar isso. Se bater no limite de 40%, o resto vai pro prazo automaticamente.
   percentualLanceParaParcela: number; // 0 a 100
   
   mesContemplacao: number; 
@@ -24,6 +22,7 @@ export interface ContemplationScenario {
   mes: number;
   mesRelativo: number;
   novoPrazo: number; // Mantemos float para precisão interna
+  parcelasAbatidas: number; // Novo campo para mostrar o abatimento
   novaParcela: number;
   amortizacaoInfo: string;
 }
@@ -74,83 +73,99 @@ export class ConsortiumCalculator {
       parcelaPosPadrao = parcelaPre + acrescimo;
     }
 
-    // --- 5. GERAÇÃO DA TABELA DE CENÁRIOS (5 MESES) ---
+    // --- GERAÇÃO DA TABELA DE CENÁRIOS (5 MESES) ---
     const cenariosContemplacao: ContemplationScenario[] = [];
     const mesInicial = mesContemplacao > 0 ? mesContemplacao : 1;
+    
+    // A parcela base a ser amortizada é a parcela cheia PÓS-recomposição do crédito, se for o caso
+    const baseParcelaAmortizacao = tableMeta.plan === 'NORMAL' ? parcelaPre : parcelaPosPadrao;
+
 
     for (let i = 0; i < 5; i++) {
       const mesAtual = mesInicial + i;
       
       if (mesAtual > prazo) break;
 
-      // 1. Definir Saldo Devedor Restante no momento da contemplação
-      // Assumimos que as parcelas anteriores a 'mesAtual' já foram pagas ou não entram na conta de amortização.
-      // Prazo Restante = Total - Parcelas já passadas (mesAtual).
-      const prazoRestante = prazo - mesAtual; 
+      // O Prazo Restante é o prazo total menos o mês de contemplação.
+      const prazoTotalRestante = prazo - mesAtual; 
       
-      // Base de cálculo: Parcela Cheia (Normal ou Pós-Light recomposta)
-      const baseParcela = tableMeta.plan === 'NORMAL' ? parcelaPre : parcelaPosPadrao;
+      let novaParcela = baseParcelaAmortizacao;
+      let novoPrazo = prazoTotalRestante;
+      let parcelasAbatidas = 0;
+      let amortizacaoInfo = "";
       
-      const saldoDevedorTotal = baseParcela * prazoRestante;
-      
-      // O Lance abate o saldo devedor TOTAL, independente de como alteramos a parcela/prazo.
-      // É matemática pura: Dívida Nova = Dívida Velha - Dinheiro do Lance.
-      const saldoPosLance = saldoDevedorTotal - lanceTotal;
+      // Variável declarada aqui para garantir escopo correto fora dos IFs/ELSEs.
+      let reducaoMensalEfetiva: number; 
 
-      let novoPrazo = prazoRestante;
-      let novaParcela = baseParcela;
-      let info = "";
-
-      if (saldoPosLance <= 0) {
-        novoPrazo = 0;
-        novaParcela = 0;
-        info = "Quitado";
+      if (lanceTotal === 0) {
+        amortizacaoInfo = "Sem Lance";
+        novaParcela = baseParcelaAmortizacao;
+        novoPrazo = prazoTotalRestante;
+        reducaoMensalEfetiva = 0; // Inicializa para caso lanceTotal seja 0
       } else {
-        // 2. Definir a Nova Parcela baseada na preferência do usuário
+        // --- CÁLCULO DE AMORTIZAÇÃO (Lógica Reajustada) ---
         
-        // Quanto do lance o usuário GOSTARIA de usar para abater parcela?
-        const lanceAlocadoIntencao = lanceTotal * (percentualLanceParaParcela / 100);
+        // 1. Lance Alocado para Redução de Parcela (Valor INTENCIONAL)
+        const lanceIntencionalParaParcela = lanceTotal * (percentualLanceParaParcela / 100);
         
-        // Se usássemos esse valor para reduzir linearmente a parcela no prazo restante atual:
-        const reducaoMensal = lanceAlocadoIntencao / prazoRestante;
-        let parcelaDesejada = baseParcela - reducaoMensal;
-
-        // 3. Aplicar a trava de 40% (A nova parcela não pode ser menor que 60% da original)
-        const parcelaMinimaPermitida = baseParcela * 0.60; 
-
-        if (parcelaDesejada < parcelaMinimaPermitida) {
-            // Se a redução desejada viola o limite, travamos no limite.
-            novaParcela = parcelaMinimaPermitida;
-            info = "Max Red. Parcela (40%)";
+        // 2. Definir Redução Máxima Mensal Permitida (40% da parcela base)
+        // CORREÇÃO: Variável 'baseParcelaAmortizacao' utilizada corretamente aqui
+        const reducaoMaximaMensal = baseParcelaAmortizacao * 0.40;
+        
+        // Se o Prazo Restante for 0, não há mais meses para diluir a redução.
+        if (prazoTotalRestante <= 0) {
+            reducaoMensalEfetiva = 0; 
         } else {
-            // Caso contrário, acatamos a parcela calculada pelo percentual escolhido
-            novaParcela = parcelaDesejada;
-            if (percentualLanceParaParcela > 0) {
-                info = `Red. Parcela (${percentualLanceParaParcela}%)`;
+            // 3. Redução Mensal Intencional (em R$/mês)
+            const reducaoMensalIntencional = lanceIntencionalParaParcela / prazoTotalRestante;
+            
+            // 4. Nova Parcela (respeitando o limite de 40%)
+            reducaoMensalEfetiva = Math.min(reducaoMensalIntencional, reducaoMaximaMensal);
+        }
+        
+        novaParcela = baseParcelaAmortizacao - reducaoMensalEfetiva;
+
+        // 5. Lance Remanescente para Abatimento de Prazo
+        // O lance consumido na parcela é a Redução Efetiva * Prazo Restante. 
+        const lanceConsumidoNaParcela = reducaoMensalEfetiva * prazoTotalRestante;
+        const lanceAlocadoParaPrazo = lanceTotal - lanceConsumidoNaParcela;
+        
+        // 6. Abatimento de Prazo: Quantas parcelas o lance remanescente compra.
+        if (novaParcela > 0) {
+            parcelasAbatidas = lanceAlocadoParaPrazo / novaParcela;
+        } else {
+            // Se a nova parcela for zero (crédito totalmente quitado de uma vez)
+            parcelasAbatidas = prazoTotalRestante;
+        }
+
+        // 7. Novo Prazo Final
+        novoPrazo = prazoTotalRestante - parcelasAbatidas;
+        
+        if (novoPrazo <= 0) {
+            novoPrazo = 0;
+            amortizacaoInfo = "Quitado";
+            parcelasAbatidas = prazoTotalRestante;
+        } else {
+            if (reducaoMensalEfetiva >= reducaoMaximaMensal - 0.01) {
+                amortizacaoInfo = "Red. Máx. Parcela (40%) + Red. Prazo";
+            } else if (reducaoMensalEfetiva > 0) {
+                amortizacaoInfo = `Red. Parcela (${percentualLanceParaParcela}%) + Red. Prazo`;
             } else {
-                info = "Red. Prazo (100%)";
+                amortizacaoInfo = "Red. Prazo (100%)";
             }
         }
-
-        // 4. Calcular o Novo Prazo Automaticamente
-        // Fórmula Mágica: Prazo = Saldo Devedor Restante / Valor da Parcela que vou pagar
-        // O 'saldoPosLance' já considera TODO o lance descontado.
-        // Portanto, se travamos a parcela em um valor mais alto (devido aos 40%), 
-        // o saldo será dividido por um número maior, resultando em menos meses (redução de prazo automática).
-        
-        if (novaParcela > 0) {
-             novoPrazo = saldoPosLance / novaParcela;
-        } else {
-             novoPrazo = 0;
-        }
       }
+      
+      // Garante que o prazo não seja negativo
+      novoPrazo = Math.max(0, novoPrazo);
 
       cenariosContemplacao.push({
         mes: mesAtual,
         mesRelativo: i + 1,
         novoPrazo, 
         novaParcela,
-        amortizacaoInfo: info
+        parcelasAbatidas: parcelasAbatidas, // Novo campo
+        amortizacaoInfo
       });
     }
 
