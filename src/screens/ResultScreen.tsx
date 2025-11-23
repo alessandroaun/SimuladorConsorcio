@@ -1,21 +1,56 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context'; 
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { ArrowLeft, Share2, CheckCircle2, Car, CalendarClock } from 'lucide-react-native';
+import { ArrowLeft, Share2, CheckCircle2, Car, CalendarClock, AlertTriangle } from 'lucide-react-native';
 import { RootStackParamList } from '../types/navigation';
+import { ContemplationScenario } from '../utils/ConsortiumCalculator';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Result'>;
 
+type ScenarioMode = 'REDUZIDO' | 'CHEIO';
+
 export default function ResultScreen({ route, navigation }: Props) {
   const { result, input } = route.params;
+  
+  // Estado para controlar qual caminho o usuário está vendo (apenas para LIGHT/SL)
+  const [mode, setMode] = useState<ScenarioMode>('REDUZIDO');
+
+  const isSpecialPlan = result.plano === 'LIGHT' || result.plano === 'SUPERLIGHT';
+  const fatorPlano = result.plano === 'LIGHT' ? 0.75 : result.plano === 'SUPERLIGHT' ? 0.50 : 1.0;
 
   const handleExport = () => {
     Alert.alert("Exportar", "Funcionalidade de PDF será implementada aqui.");
   };
 
   const formatBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const formatMeses = (v: number) => `${v.toFixed(1)} meses`;
 
+  // --- SELEÇÃO DE DADOS COM BASE NO MODO ---
+  let activeScenario: ContemplationScenario[];
+  let creditoExibido: number;
+  let isReajustado = false;
+
+  // Lógica de Seleção: Se for plano especial e tiver os dados dos cenários, usa o modo selecionado
+  if (isSpecialPlan && result.cenarioCreditoReduzido && result.cenarioCreditoTotal) {
+      if (mode === 'REDUZIDO') {
+          // Caminho 1: Crédito Reduzido, Parcela Original
+          activeScenario = result.cenarioCreditoReduzido;
+          // O crédito efetivo já vem calculado dentro do cenário (considerando lances)
+          creditoExibido = activeScenario[0].creditoEfetivo; 
+      } else {
+          // Caminho 2: Crédito Cheio, Parcela Reajustada
+          activeScenario = result.cenarioCreditoTotal;
+          creditoExibido = activeScenario[0].creditoEfetivo;
+          isReajustado = true;
+      }
+  } else {
+      // Plano NORMAL (Fallback)
+      activeScenario = result.cenariosContemplacao;
+      creditoExibido = result.creditoLiquido;
+  }
+
+  const cenarioPrincipal = activeScenario[0];
   const lanceEmbutidoValor = result.lanceTotal - input.lanceBolso - result.lanceCartaVal;
 
   return (
@@ -32,36 +67,89 @@ export default function ResultScreen({ route, navigation }: Props) {
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
         
-        {/* Cabeçalho Parcela Normal */}
-        <View style={styles.resultHeader}>
-          <Text style={styles.resultLabel}>PARCELA MENSAL (2ª em diante)</Text>
-          <Text style={styles.resultBigValue}>{formatBRL(result.parcelaPreContemplacao)}</Text>
-          {result.plano !== 'NORMAL' && (
-            <View style={styles.warnBadge}>
-              <Text style={styles.warnText}>Plano {result.plano}</Text>
-            </View>
-          )}
-        </View>
+        {/* --- SELETOR DE CAMINHO (APENAS LIGHT/SUPERLIGHT) --- */}
+        {isSpecialPlan && (
+            <View style={styles.toggleContainer}>
+                <Text style={styles.toggleLabel}>Escolha o caminho pós-contemplação:</Text>
+                <View style={styles.toggleRow}>
+                    <TouchableOpacity 
+                        style={[styles.toggleBtn, mode === 'REDUZIDO' && styles.toggleBtnActive]}
+                        onPress={() => setMode('REDUZIDO')}
+                    >
+                        <Text style={[styles.toggleBtnText, mode === 'REDUZIDO' && styles.toggleBtnTextActive]}>
+                            Caminho 1{'\n'}
+                            (Crédito {fatorPlano*100}%)
+                        </Text>
+                    </TouchableOpacity>
 
-        {/* PAGAMENTO NO ATO */}
-        {result.valorAdesao > 0 && (
-          <View style={styles.highlightBox}>
-            <View style={styles.highlightHeader}>
-              <CheckCircle2 color="#fff" size={20} />
-              <Text style={styles.highlightTitle}>PAGAMENTO NO ATO (1ª PARCELA)</Text>
+                    <TouchableOpacity 
+                        style={[styles.toggleBtn, mode === 'CHEIO' && styles.toggleBtnActive]}
+                        onPress={() => setMode('CHEIO')}
+                    >
+                        <Text style={[styles.toggleBtnText, mode === 'CHEIO' && styles.toggleBtnTextActive]}>
+                            Caminho 2{'\n'}
+                            (Crédito 100%)
+                        </Text>
+                    </TouchableOpacity>
+                </View>
+                
+                {/* DESCRIÇÃO DO CAMINHO SELECIONADO */}
+                <View style={styles.pathDescription}>
+                    <Text style={styles.pathDescText}>
+                        {mode === 'REDUZIDO' 
+                            ? `Você mantém a parcela atual, mas recebe apenas ${fatorPlano*100}% do crédito contratado (menos lances).`
+                            : `Você recebe 100% do crédito (menos lances), mas a parcela é reajustada para cobrir a diferença.`
+                        }
+                    </Text>
+                </View>
+
+                {/* ALERTA ESPECÍFICO SUPERLIGHT CAMINHO 1 */}
+                {result.plano === 'SUPERLIGHT' && mode === 'REDUZIDO' && (
+                    <View style={styles.riskAlert}>
+                        <AlertTriangle color="#B91C1C" size={20} />
+                        <Text style={styles.riskAlertText}>
+                            Atenção: No Superlight, o lance embutido reduz ainda mais seus 50% de crédito. Você pode acabar recebendo apenas 25% do valor total da carta.
+                        </Text>
+                    </View>
+                )}
             </View>
-            <Text style={styles.highlightSubtitle}>
-              Parcela ({formatBRL(result.parcelaPreContemplacao)}) + Adesão ({formatBRL(result.valorAdesao)})
-            </Text>
-            <Text style={styles.highlightValue}>{formatBRL(result.totalPrimeiraParcela)}</Text>
-          </View>
         )}
+
+        {/* --- CABEÇALHO: DESTAQUE PARA A 1ª PARCELA --- */}
+        <View style={styles.highlightBox}>
+            <View style={styles.rowBetween}>
+                <Text style={styles.highlightTitle}>VALOR DA 1ª PARCELA</Text>
+                <View style={styles.planBadgeInverse}>
+                    <Text style={styles.planBadgeText}>PLANO {result.plano}</Text>
+                </View>
+            </View>
+
+            <Text style={styles.highlightValue}>{formatBRL(result.totalPrimeiraParcela)}</Text>
+
+            {result.valorAdesao > 0 ? (
+                <View style={styles.adesaoRow}>
+                    <CheckCircle2 color="#4ADE80" size={18} style={{marginRight: 6}}/>
+                    <Text style={styles.highlightSubtitle}>
+                        Incluso: Parcela ({formatBRL(result.parcelaPreContemplacao)}) + Adesão ({formatBRL(result.valorAdesao)})
+                    </Text>
+                </View>
+            ) : (
+                <Text style={styles.highlightSubtitle}>
+                   Referente ao pagamento no ato (sem taxa de adesão).
+                </Text>
+            )}
+        </View>
 
         {/* Resumo Crédito/Prazo */}
         <View style={styles.grid}>
           <View style={styles.statBox}>
-            <Text style={styles.statLabel}>Crédito Contratado</Text>
-            <Text style={styles.statValue}>{formatBRL(result.creditoOriginal)}</Text>
+            <Text style={styles.statLabel}>
+                {isSpecialPlan ? `Crédito Base (${mode === 'REDUZIDO' ? fatorPlano*100 : '100'}%)` : 'Crédito Contratado'}
+            </Text>
+            <Text style={styles.statValue}>
+                {/* Mostra o Crédito Bruto (antes dos lances) correspondente ao modo */}
+                {formatBRL(mode === 'REDUZIDO' && isSpecialPlan ? result.creditoOriginal * fatorPlano : result.creditoOriginal)}
+            </Text>
           </View>
            <View style={styles.statBox}>
             <Text style={styles.statLabel}>Prazo</Text>
@@ -80,7 +168,7 @@ export default function ResultScreen({ route, navigation }: Props) {
             </View>
             
             <View style={styles.rowBetween}>
-              <Text style={styles.text}>% do Crédito:</Text>
+              <Text style={styles.text}>% do Crédito Original:</Text>
               <Text style={styles.textBold}>{((result.lanceTotal / result.creditoOriginal) * 100).toFixed(2)}%</Text>
             </View>
             
@@ -103,12 +191,13 @@ export default function ResultScreen({ route, navigation }: Props) {
             <View style={styles.divider} />
             
             <View style={styles.rowBetween}>
-              <Text style={styles.text}>Crédito Líquido (Na Mão):</Text>
-              <Text style={styles.textBold}>{formatBRL(result.creditoLiquido)}</Text>
+              <Text style={styles.text}>Crédito Líquido (Recebido):</Text>
+              <Text style={[styles.textBold, {fontSize: 16}]}>{formatBRL(creditoExibido)}</Text>
             </View>
             <Text style={styles.helperText}>
-                Valor depositado em conta para a compra do bem (descontando Embutido e Carta).
+                Valor disponível para compra do bem (Líquido final).
             </Text>
+            
 
             {result.lanceCartaVal > 0 && (
                 <View style={styles.infoBox}>
@@ -118,7 +207,7 @@ export default function ResultScreen({ route, navigation }: Props) {
                     </View>
                     
                     <Text style={styles.infoText}>
-                        Ao ser contemplado, você receberá <Text style={{fontWeight:'bold'}}>{formatBRL(result.creditoLiquido)}</Text> em dinheiro. 
+                        Ao ser contemplado, você receberá <Text style={{fontWeight:'bold'}}>{formatBRL(creditoExibido)}</Text> em dinheiro. 
                         Somando ao seu bem ofertado ({formatBRL(result.lanceCartaVal)}), você compra um bem de valor total:
                     </Text>
 
@@ -126,23 +215,54 @@ export default function ResultScreen({ route, navigation }: Props) {
                     
                     <View style={styles.rowBetween}>
                         <Text style={styles.infoTotalLabel}>Valor Total do Bem:</Text>
-                        <Text style={styles.infoTotalValue}>{formatBRL(result.creditoLiquido + result.lanceCartaVal)}</Text>
+                        <Text style={styles.infoTotalValue}>{formatBRL(creditoExibido + result.lanceCartaVal)}</Text>
                     </View>
                 </View>
             )}
           </View>
         )}
 
-        {/* TABELA DE PREVISÃO (ATUALIZADA) */}
-        {result.cenariosContemplacao && result.cenariosContemplacao.length > 0 && (
+        {/* TABELA DE PREVISÃO PÓS-CONTEMPLAÇÃO */}
+        {cenarioPrincipal && (
             <View style={styles.card}>
                 <View style={styles.rowBetween}>
-                    <Text style={styles.cardTitle}>Previsão Pós-Contemplação</Text>
+                    <Text style={styles.cardTitle}>
+                        {isReajustado ? 'Previsão (Parcela Reajustada)' : 'Previsão Pós-Contemplação'}
+                    </Text>
                     <CalendarClock color="#64748B" size={20} />
                 </View>
+                
+                {/* Aviso se a parcela foi reajustada (Caminho 2) */}
+                {isReajustado && (
+                    <View style={[styles.infoBox, {backgroundColor: '#FEFCE8', borderColor: '#FDE047', marginBottom: 12, marginTop: 0}]}>
+                        <Text style={[styles.infoText, {color: '#854D0E'}]}>
+                            Como você optou por 100% do crédito, a parcela foi reajustada para cobrir a diferença não paga anteriormente.
+                        </Text>
+                    </View>
+                )}
+
                 <Text style={[styles.helperText, {marginBottom: 12}]}>
-                    Simulação para os 5 meses seguintes a partir da parcela {result.cenariosContemplacao[0].mes}.
+                    Simulação para os 5 meses seguintes a partir da parcela {cenarioPrincipal.mes}º.
                 </Text>
+
+                {/* Resumo Abatimento */}
+                 {result.lanceTotal > 0 && (
+                    <View style={[styles.infoBox, {backgroundColor: '#ECFDF5', borderColor: '#A7F3D0', marginBottom: 12}]}>
+                         <View style={styles.rowBetween}>
+                            <Text style={[styles.text, {color: '#059669'}]}>Nova Parcela (Abatimento):</Text>
+                            <Text style={[styles.textBold, {color: '#059669', fontSize: 16}]}>{formatBRL(cenarioPrincipal.novaParcela)}</Text>
+                        </View>
+                        <View style={styles.rowBetween}>
+                            <Text style={[styles.text, {color: '#059669'}]}>Parcelas Abatidas:</Text>
+                            <Text style={[styles.textBold, {color: '#059669', fontSize: 16}]}>{cenarioPrincipal.parcelasAbatidas.toFixed(1)}x</Text>
+                        </View>
+                        <View style={styles.rowBetween}>
+                            <Text style={[styles.text, {color: '#059669'}]}>Novo Prazo Estimado:</Text>
+                            <Text style={[styles.textBold, {color: '#059669', fontSize: 16}]}>{formatMeses(cenarioPrincipal.novoPrazo)}</Text>
+                        </View>
+                    </View>
+                 )}
+
 
                 <View style={[styles.tableRowHeader, {backgroundColor: '#F1F5F9'}]}>
                     <Text style={[styles.tableHeaderCol, {flex: 0.4}]}>Mês</Text>
@@ -150,21 +270,21 @@ export default function ResultScreen({ route, navigation }: Props) {
                     <Text style={[styles.tableHeaderCol, {flex: 1}]}>Novo Prazo</Text>
                 </View>
 
-                {result.cenariosContemplacao.map((cenario) => (
+                {activeScenario.map((cenario) => (
                     <View key={cenario.mes} style={styles.tableRow}>
                         <Text style={[styles.tableCell, {flex: 0.4, fontWeight: 'bold'}]}>{cenario.mes}º</Text>
                         <Text style={[styles.tableCell, {flex: 1, color: '#15803D', fontWeight: 'bold'}]}>
                             {formatBRL(cenario.novaParcela)}
                         </Text>
                         <Text style={[styles.tableCell, {flex: 1}]}>
-                            {/* Arredonda para exibição conforme pedido */}
+                            {/* Arredonda para exibição */}
                             {Math.round(cenario.novoPrazo)}x
                         </Text>
                     </View>
                 ))}
                 
                 <Text style={[styles.helperText, {marginTop: 8, fontSize: 10}]}>
-                   * Prazo arredondado. Info: {result.cenariosContemplacao[0].amortizacaoInfo}
+                   * Prazo exibido arredondado. Detalhe: {cenarioPrincipal.amortizacaoInfo}
                 </Text>
             </View>
         )}
@@ -185,12 +305,11 @@ export default function ResultScreen({ route, navigation }: Props) {
             <Text style={styles.text}>{formatBRL(result.seguroMensal)}</Text>
           </View>
           
-          {result.valorAdesao > 0 && (
-             <View style={styles.rowBetween}>
-              <Text style={styles.text}>Taxa de Adesão (Ato):</Text>
-              <Text style={styles.text}>{formatBRL(result.valorAdesao)}</Text>
-            </View>
-          )}
+          <View style={styles.rowBetween}>
+             <Text style={styles.text}>Taxa de Adesão (Ato):</Text>
+             <Text style={styles.text}>{formatBRL(result.valorAdesao)}</Text>
+          </View>
+          
 
           <View style={styles.divider} />
           <View style={styles.rowBetween}>
@@ -217,11 +336,24 @@ const styles = StyleSheet.create({
   backBtn: { padding: 8, marginRight: 8 },
   navTitle: { fontSize: 18, fontWeight: '600', color: '#0F172A' },
   scrollContent: { padding: 16, paddingBottom: 40 },
-  resultHeader: { alignItems: 'center', marginBottom: 24, marginTop: 8 },
-  resultLabel: { fontSize: 12, color: '#64748B', letterSpacing: 1, textTransform: 'uppercase' },
-  resultBigValue: { fontSize: 36, fontWeight: 'bold', color: '#0F172A' },
-  warnBadge: { backgroundColor: '#FEF3C7', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, marginTop: 8 },
-  warnText: { color: '#B45309', fontWeight: 'bold', fontSize: 12 },
+  
+  highlightBox: { 
+      backgroundColor: '#0F172A', 
+      borderRadius: 16, 
+      padding: 20, 
+      marginBottom: 24, 
+      shadowColor: '#000', 
+      shadowOpacity: 0.2, 
+      shadowRadius: 5, 
+      elevation: 4 
+  },
+  highlightTitle: { color: '#94A3B8', fontWeight: '700', fontSize: 12, letterSpacing: 1, textTransform: 'uppercase' },
+  highlightValue: { color: '#fff', fontSize: 36, fontWeight: 'bold', marginVertical: 8 },
+  highlightSubtitle: { color: '#CBD5E1', fontSize: 13 },
+  planBadgeInverse: { backgroundColor: '#334155', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
+  planBadgeText: { color: '#fff', fontSize: 10, fontWeight: 'bold' },
+  adesaoRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4, backgroundColor: 'rgba(255,255,255,0.1)', padding: 8, borderRadius: 8 },
+
   grid: { flexDirection: 'row', gap: 12, marginBottom: 16 },
   statBox: { flex: 1, backgroundColor: '#fff', padding: 16, borderRadius: 12, alignItems: 'center', elevation: 1 },
   statLabel: { fontSize: 12, color: '#64748B' },
@@ -233,17 +365,9 @@ const styles = StyleSheet.create({
   textBold: { fontSize: 14, fontWeight: 'bold', color: '#0F172A' },
   divider: { height: 1, backgroundColor: '#E2E8F0', marginVertical: 12 },
   helperText: { fontSize: 12, color: '#94A3B8', marginTop: 4, fontStyle: 'italic' },
-  newParcela: { fontSize: 24, fontWeight: 'bold', color: '#15803D', marginTop: 4 },
   mainBtn: { borderRadius: 12, padding: 16, alignItems: 'center' },
   mainBtnText: { fontWeight: 'bold', fontSize: 16 },
   
-  // NOVOS ESTILOS
-  highlightBox: { backgroundColor: '#0F172A', borderRadius: 16, padding: 20, marginBottom: 24, alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 5, elevation: 4 },
-  highlightHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 8 },
-  highlightTitle: { color: '#fff', fontWeight: 'bold', fontSize: 14, letterSpacing: 1 },
-  highlightSubtitle: { color: '#94A3B8', fontSize: 12, marginBottom: 4 },
-  highlightValue: { color: '#22C55E', fontSize: 32, fontWeight: 'bold' },
-
   subDetailBox: { backgroundColor: '#F8FAFC', padding: 12, borderRadius: 8, marginTop: 8, borderWidth: 1, borderColor: '#F1F5F9' },
   subDetailTitle: { fontSize: 12, fontWeight: 'bold', color: '#64748B', marginBottom: 8, textTransform: 'uppercase' },
   subDetailText: { fontSize: 12, color: '#475569' },
@@ -254,10 +378,22 @@ const styles = StyleSheet.create({
   dividerLight: { height: 1, backgroundColor: '#BAE6FD', marginVertical: 12 },
   infoTotalLabel: { color: '#0369A1', fontWeight: 'bold', fontSize: 14 },
   infoTotalValue: { color: '#0369A1', fontWeight: 'bold', fontSize: 18 },
-  alertText: { marginTop: 8, fontSize: 11, color: '#F59E0B', fontStyle: 'italic' },
 
   tableRowHeader: { flexDirection: 'row', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#E2E8F0', borderRadius: 6 },
   tableHeaderCol: { fontSize: 12, fontWeight: 'bold', color: '#64748B', textAlign: 'center' },
   tableRow: { flexDirection: 'row', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
-  tableCell: { fontSize: 13, color: '#334155', textAlign: 'center' }
+  tableCell: { fontSize: 13, color: '#334155', textAlign: 'center' },
+
+  // --- ESTILOS DO TOGGLE (NOVO) ---
+  toggleContainer: { backgroundColor: '#fff', padding: 16, borderRadius: 12, marginBottom: 16, elevation: 1 },
+  toggleLabel: { fontSize: 14, fontWeight: '600', color: '#0F172A', marginBottom: 12 },
+  toggleRow: { flexDirection: 'row', gap: 12 },
+  toggleBtn: { flex: 1, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#CBD5E1', alignItems: 'center', justifyContent: 'center', backgroundColor: '#F8FAFC' },
+  toggleBtnActive: { backgroundColor: '#0EA5E9', borderColor: '#0EA5E9' },
+  toggleBtnText: { fontSize: 12, color: '#64748B', textAlign: 'center', fontWeight: '600' },
+  toggleBtnTextActive: { color: '#fff' },
+  pathDescription: { marginTop: 12, padding: 12, backgroundColor: '#F1F5F9', borderRadius: 8 },
+  pathDescText: { fontSize: 13, color: '#334155', fontStyle: 'italic' },
+  riskAlert: { flexDirection: 'row', gap: 8, marginTop: 12, backgroundColor: '#FEF2F2', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#FECACA' },
+  riskAlertText: { flex: 1, fontSize: 12, color: '#B91C1C', fontWeight: '600' },
 });
