@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context'; 
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { ArrowLeft, Share2, CheckCircle2, Car, CalendarClock, AlertTriangle } from 'lucide-react-native';
+import { ArrowLeft, Share2, CheckCircle2, Car, CalendarClock, AlertTriangle, Ban } from 'lucide-react-native';
 import { RootStackParamList } from '../types/navigation';
 import { ContemplationScenario } from '../utils/ConsortiumCalculator';
 
@@ -13,8 +13,13 @@ type ScenarioMode = 'REDUZIDO' | 'CHEIO';
 export default function ResultScreen({ route, navigation }: Props) {
   const { result, input } = route.params;
   
-  // Estado para controlar qual caminho o usuário está vendo (apenas para LIGHT/SL)
-  const [mode, setMode] = useState<ScenarioMode>('REDUZIDO');
+  // Verifica se o Caminho 1 é viável (não é null, conforme definido no Calculator)
+  const isCaminho1Viable = result.cenarioCreditoReduzido !== null;
+
+  // Estado para controlar qual caminho o usuário está vendo
+  // LÓGICA: Se o Caminho 1 não for viável (ex: lances estouraram o crédito reduzido), 
+  // inicia forçadamente no CHEIO (Caminho 2).
+  const [mode, setMode] = useState<ScenarioMode>(isCaminho1Viable ? 'REDUZIDO' : 'CHEIO');
 
   const isSpecialPlan = result.plano === 'LIGHT' || result.plano === 'SUPERLIGHT';
   const fatorPlano = result.plano === 'LIGHT' ? 0.75 : result.plano === 'SUPERLIGHT' ? 0.50 : 1.0;
@@ -31,21 +36,21 @@ export default function ResultScreen({ route, navigation }: Props) {
   let creditoExibido: number;
   let isReajustado = false;
 
-  // Lógica de Seleção: Se for plano especial e tiver os dados dos cenários, usa o modo selecionado
-  if (isSpecialPlan && result.cenarioCreditoReduzido && result.cenarioCreditoTotal) {
-      if (mode === 'REDUZIDO') {
+  // Lógica de Seleção de Cenário
+  if (isSpecialPlan && result.cenarioCreditoTotal) { 
+      // Verifica se estamos no modo REDUZIDO e se ele é realmente viável
+      if (mode === 'REDUZIDO' && isCaminho1Viable && result.cenarioCreditoReduzido) {
           // Caminho 1: Crédito Reduzido, Parcela Original
           activeScenario = result.cenarioCreditoReduzido;
-          // O crédito efetivo já vem calculado dentro do cenário (considerando lances)
           creditoExibido = activeScenario[0].creditoEfetivo; 
       } else {
-          // Caminho 2: Crédito Cheio, Parcela Reajustada
+          // Caminho 2: Crédito Cheio (ou fallback obrigatório se 1 estiver bloqueado)
           activeScenario = result.cenarioCreditoTotal;
           creditoExibido = activeScenario[0].creditoEfetivo;
           isReajustado = true;
       }
   } else {
-      // Plano NORMAL (Fallback)
+      // Plano NORMAL (Sem bifurcação)
       activeScenario = result.cenariosContemplacao;
       creditoExibido = result.creditoLiquido;
   }
@@ -71,17 +76,39 @@ export default function ResultScreen({ route, navigation }: Props) {
         {isSpecialPlan && (
             <View style={styles.toggleContainer}>
                 <Text style={styles.toggleLabel}>Escolha o caminho pós-contemplação:</Text>
+                
+                {/* ALERTA DE BLOQUEIO DO CAMINHO 1 */}
+                {!isCaminho1Viable && (
+                   <View style={styles.pathBlockedAlert}>
+                      <Ban color="#EF4444" size={16} />
+                      <Text style={styles.pathBlockedText}>
+                        O Caminho 1 foi desabilitado pois seus lances excedem o crédito reduzido.
+                      </Text>
+                   </View>
+                )}
+
                 <View style={styles.toggleRow}>
+                    {/* BOTÃO CAMINHO 1 (Pode estar desabilitado) */}
                     <TouchableOpacity 
-                        style={[styles.toggleBtn, mode === 'REDUZIDO' && styles.toggleBtnActive]}
-                        onPress={() => setMode('REDUZIDO')}
+                        style={[
+                            styles.toggleBtn, 
+                            mode === 'REDUZIDO' && styles.toggleBtnActive,
+                            !isCaminho1Viable && styles.toggleBtnDisabled
+                        ]}
+                        onPress={() => isCaminho1Viable && setMode('REDUZIDO')}
+                        disabled={!isCaminho1Viable}
                     >
-                        <Text style={[styles.toggleBtnText, mode === 'REDUZIDO' && styles.toggleBtnTextActive]}>
+                        <Text style={[
+                            styles.toggleBtnText, 
+                            mode === 'REDUZIDO' && styles.toggleBtnTextActive,
+                            !isCaminho1Viable && styles.toggleBtnTextDisabled
+                        ]}>
                             Caminho 1{'\n'}
                             (Crédito {fatorPlano*100}%)
                         </Text>
                     </TouchableOpacity>
 
+                    {/* BOTÃO CAMINHO 2 (Sempre habilitado se chegou aqui) */}
                     <TouchableOpacity 
                         style={[styles.toggleBtn, mode === 'CHEIO' && styles.toggleBtnActive]}
                         onPress={() => setMode('CHEIO')}
@@ -103,8 +130,8 @@ export default function ResultScreen({ route, navigation }: Props) {
                     </Text>
                 </View>
 
-                {/* ALERTA ESPECÍFICO SUPERLIGHT CAMINHO 1 */}
-                {result.plano === 'SUPERLIGHT' && mode === 'REDUZIDO' && (
+                {/* ALERTA ESPECÍFICO SUPERLIGHT CAMINHO 1 (Apenas se estiver ativo e visível) */}
+                {result.plano === 'SUPERLIGHT' && mode === 'REDUZIDO' && isCaminho1Viable && (
                     <View style={styles.riskAlert}>
                         <AlertTriangle color="#B91C1C" size={20} />
                         <Text style={styles.riskAlertText}>
@@ -390,10 +417,16 @@ const styles = StyleSheet.create({
   toggleRow: { flexDirection: 'row', gap: 12 },
   toggleBtn: { flex: 1, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#CBD5E1', alignItems: 'center', justifyContent: 'center', backgroundColor: '#F8FAFC' },
   toggleBtnActive: { backgroundColor: '#0EA5E9', borderColor: '#0EA5E9' },
+  toggleBtnDisabled: { backgroundColor: '#E2E8F0', borderColor: '#E2E8F0', opacity: 0.6 },
   toggleBtnText: { fontSize: 12, color: '#64748B', textAlign: 'center', fontWeight: '600' },
   toggleBtnTextActive: { color: '#fff' },
+  toggleBtnTextDisabled: { color: '#94A3B8' },
+  
   pathDescription: { marginTop: 12, padding: 12, backgroundColor: '#F1F5F9', borderRadius: 8 },
   pathDescText: { fontSize: 13, color: '#334155', fontStyle: 'italic' },
   riskAlert: { flexDirection: 'row', gap: 8, marginTop: 12, backgroundColor: '#FEF2F2', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#FECACA' },
   riskAlertText: { flex: 1, fontSize: 12, color: '#B91C1C', fontWeight: '600' },
+  
+  pathBlockedAlert: { flexDirection: 'row', gap: 8, marginBottom: 12, backgroundColor: '#FEF2F2', padding: 10, borderRadius: 8, alignItems: 'center' },
+  pathBlockedText: { flex: 1, fontSize: 12, color: '#EF4444', fontWeight: 'bold' },
 });

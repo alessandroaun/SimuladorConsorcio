@@ -22,11 +22,11 @@ export interface SimulationInput {
 export interface ContemplationScenario {
   mes: number;
   mesRelativo: number;
-  novoPrazo: number; // Mantemos float para precisão interna
-  parcelasAbatidas: number; // Novo campo para mostrar o abatimento
+  novoPrazo: number;
+  parcelasAbatidas: number;
   novaParcela: number;
   amortizacaoInfo: string;
-  creditoEfetivo: number; // Crédito líquido que o cliente irá receber neste cenário
+  creditoEfetivo: number;
 }
 
 // Interface de Resultado
@@ -40,111 +40,118 @@ export interface SimulationResult {
   totalPrimeiraParcela: number;
   creditoOriginal: number;
   
-  // Campos padrão (usados pelo NORMAL e como fallback)
+  // Campos padrão
   creditoLiquido: number;
   lanceTotal: number;
   plano: PlanType;
   lanceCartaVal: number; 
-  cenariosContemplacao: ContemplationScenario[]; // Usado para o plano NORMAL
+  cenariosContemplacao: ContemplationScenario[]; 
 
-  // NOVOS CAMPOS PARA LIGHT/SUPERLIGHT
-  // Se null, significa que é plano NORMAL
-  cenarioCreditoReduzido: ContemplationScenario[] | null; // Caminho 1
-  cenarioCreditoTotal: ContemplationScenario[] | null;    // Caminho 2
-  parcelaPosCaminho2: number; // Parcela reajustada do caminho 2 (Baseada no mês de contemplação informado)
+  // Campos Light/Superlight
+  cenarioCreditoReduzido: ContemplationScenario[] | null; 
+  cenarioCreditoTotal: ContemplationScenario[] | null;    
+  parcelaPosCaminho2: number; 
 }
 
 export class ConsortiumCalculator {
 
   /**
    * Função auxiliar para calcular o cenário de amortização.
-   * Agora aceita 'saldoDevedorReajuste' para aplicar a lógica do Caminho 2 (Light/Superlight).
+   * Agora aceita 'limiteReducaoMensal' (R$) calculado externamente para garantir consistência.
    */
   private static calculateAmortizationScenario(
     input: SimulationInput, 
-    baseParcelaAmortizacao: number,
+    baseParcelaOriginal: number, // Parcela ORIGINAL sem reajuste
     creditoEfetivoBase: number,
     prazoTotal: number,
     lanceTotal: number,
-    saldoDevedorReajuste: number = 0 // NOVO PARÂMETRO: Valor a ser adicionado ao saldo devedor (Gap do plano)
+    saldoDevedorReajuste: number = 0, // Valor total (Gap) a ser adicionado ao saldo devedor
+    limiteReducaoMensal: number // Teto de redução em R$ (baseado na parcela cheia)
   ): ContemplationScenario[] {
     
     const { percentualLanceParaParcela, mesContemplacao } = input;
     const cenarios: ContemplationScenario[] = [];
-    const mesInicial = mesContemplacao > 0 ? mesContemplacao : 1;
+    const mesInicial = Math.max(1, mesContemplacao > 0 ? mesContemplacao : 1);
 
+    const prazoTotalNum = Number(prazoTotal);
+    const lanceTotalNum = Math.max(0, Number(lanceTotal));
+    const saldoReajusteNum = Math.max(0, Number(saldoDevedorReajuste));
+    const pctParcelaNum = Math.max(0, Math.min(100, Number(percentualLanceParaParcela) || 0));
+
+    // Loop para gerar 5 cenários (mês X, X+1, X+2...)
     for (let i = 0; i < 5; i++) {
       const mesAtual = mesInicial + i;
       
-      if (mesAtual > prazoTotal) break;
+      if (mesAtual >= prazoTotalNum) break;
 
-      const prazoTotalRestante = prazoTotal - mesAtual; 
+      // Prazo restante para este cenário específico
+      const prazoTotalRestante = Math.max(1, prazoTotalNum - mesAtual); 
       
-      // --- LÓGICA DE REAJUSTE DO CAMINHO 2 ---
-      // Se houver saldo a ser incorporado (ex: os 25% ou 50% restantes), divide pelo prazo restante e soma à parcela.
-      let parcelaBaseParaCalculo = baseParcelaAmortizacao;
+      // 1. CÁLCULO DA PARCELA BASE
+      let parcelaBaseParaCalculo = baseParcelaOriginal;
       
-      if (saldoDevedorReajuste > 0 && prazoTotalRestante > 0) {
-          const acrescimoMensal = saldoDevedorReajuste / prazoTotalRestante;
-          parcelaBaseParaCalculo = baseParcelaAmortizacao + acrescimoMensal;
+      // No Caminho 2, adicionamos o Gap diluído
+      if (saldoReajusteNum > 0.01) {
+          const acrescimoMensal = saldoReajusteNum / prazoTotalRestante;
+          parcelaBaseParaCalculo = baseParcelaOriginal + acrescimoMensal;
       }
-      // ---------------------------------------
 
       let novaParcela = parcelaBaseParaCalculo;
       let novoPrazo = prazoTotalRestante;
       let parcelasAbatidas = 0;
       let amortizacaoInfo = "";
-      
-      let reducaoMensalEfetiva: number;
+      let reducaoMensalEfetiva = 0;
 
-      if (lanceTotal === 0) {
-        amortizacaoInfo = "Sem Lance";
-        novaParcela = parcelaBaseParaCalculo;
-        novoPrazo = prazoTotalRestante;
-        reducaoMensalEfetiva = 0;
-      } else {
-        const lanceIntencionalParaParcela = lanceTotal * (percentualLanceParaParcela / 100);
-        // A redução máxima de 40% é aplicada sobre a parcela JÁ reajustada (se for o caso) ou original?
-        // Geralmente é sobre a parcela vigente.
-        const reducaoMaximaMensal = parcelaBaseParaCalculo * 0.40;
+      // 2. APLICAÇÃO DO LANCE
+      if (lanceTotalNum > 0.01) {
+        const valorLanceParaParcela = lanceTotalNum * (pctParcelaNum / 100);
+        const valorLanceParaPrazo = lanceTotalNum - valorLanceParaParcela;
+
+        // -- Redução na Parcela --
+        // A redução é limitada pelo 'limiteReducaoMensal' passado (40% da Parcela Cheia ou Ajustada)
+        // No Caminho 2, como a parcela base cresce, recalculamos o teto se ele for maior que o fixo,
+        // mas para Caminho 1 usamos o teto baseado na cheia para evitar congelamento.
         
-        if (prazoTotalRestante <= 0) {
-            reducaoMensalEfetiva = 0; 
-        } else {
-            const reducaoMensalIntencional = lanceIntencionalParaParcela / prazoTotalRestante;
-            reducaoMensalEfetiva = Math.min(reducaoMensalIntencional, reducaoMaximaMensal);
-        }
+        // Lógica de Teto Híbrida:
+        // O teto é 40% da parcela VIGENTE ou o limiteReference passado (que é 40% da Cheia), o que for MAIOR.
+        // Isso garante que no Caminho 1 destrave (usando a Cheia) e no Caminho 2 acompanhe o crescimento (usando a Vigente).
+        const tetoDinamico = Math.max(limiteReducaoMensal, parcelaBaseParaCalculo * 0.40);
+
+        const reducaoMensalIntencional = valorLanceParaParcela / prazoTotalRestante;
+        
+        // Aplica o teto
+        reducaoMensalEfetiva = Math.min(reducaoMensalIntencional, tetoDinamico);
+        
+        const lanceConsumidoNaParcela = reducaoMensalEfetiva * prazoTotalRestante;
         
         novaParcela = parcelaBaseParaCalculo - reducaoMensalEfetiva;
 
-        const lanceConsumidoNaParcela = reducaoMensalEfetiva * prazoTotalRestante;
-        const lanceAlocadoParaPrazo = lanceTotal - lanceConsumidoNaParcela; 
+        // -- Redução no Prazo --
+        const sobraDoLanceParcela = Math.max(0, valorLanceParaParcela - lanceConsumidoNaParcela);
+        const totalDisponivelParaPrazo = valorLanceParaPrazo + sobraDoLanceParcela;
         
-        if (novaParcela > 0) {
-            parcelasAbatidas = lanceAlocadoParaPrazo / novaParcela;
+        if (novaParcela > 0.01) {
+            parcelasAbatidas = totalDisponivelParaPrazo / novaParcela;
         } else {
             parcelasAbatidas = prazoTotalRestante;
         }
 
-        novoPrazo = prazoTotalRestante - parcelasAbatidas;
+        novoPrazo = Math.max(0, prazoTotalRestante - parcelasAbatidas);
         
-        if (novoPrazo <= 0) {
-            novoPrazo = 0;
-            amortizacaoInfo = "Quitado";
-            parcelasAbatidas = prazoTotalRestante;
+        // -- Info --
+        if (novoPrazo < 0.1) {
+             amortizacaoInfo = "Quitado";
+        } else if (reducaoMensalEfetiva >= tetoDinamico - 0.01) {
+             amortizacaoInfo = "Red. Máx. Parcela (40%) + Red. Prazo";
+        } else if (reducaoMensalEfetiva > 0.01) {
+             amortizacaoInfo = `Red. Parcela (${pctParcelaNum.toFixed(0)}%) + Red. Prazo`;
         } else {
-            if (reducaoMensalEfetiva >= reducaoMaximaMensal - 0.01) {
-                amortizacaoInfo = "Red. Máx. Parcela (40%) + Red. Prazo";
-            } else if (reducaoMensalEfetiva > 0) {
-                amortizacaoInfo = `Red. Parcela (${percentualLanceParaParcela}%) + Red. Prazo`;
-            } else {
-                amortizacaoInfo = "Red. Prazo (100%)";
-            }
+             amortizacaoInfo = "Red. Prazo (100% do Lance)";
         }
+      } else {
+        amortizacaoInfo = "Sem Lance";
       }
       
-      novoPrazo = Math.max(0, novoPrazo);
-
       cenarios.push({
         mes: mesAtual,
         mesRelativo: i + 1,
@@ -152,7 +159,7 @@ export class ConsortiumCalculator {
         novaParcela,
         parcelasAbatidas,
         amortizacaoInfo,
-        creditoEfetivo: creditoEfetivoBase // Passa o crédito calculado para este cenário
+        creditoEfetivo: creditoEfetivoBase
       });
     }
 
@@ -175,11 +182,19 @@ export class ConsortiumCalculator {
     const parcelaPre = rawParcela;
     const totalPrimeiraParcela = parcelaPre + valorAdesao;
     const totalSeguro = seguroMensal * prazo;
-    
-    // --- LÓGICA BIFURCADA ---
+
+    // Definição do Fator do Plano
+    let fatorPlano = 1.0; 
+    if (tableMeta.plan === 'LIGHT') fatorPlano = 0.75;
+    if (tableMeta.plan === 'SUPERLIGHT') fatorPlano = 0.50;
+
+    // CÁLCULO DA PARCELA CHEIA (REFERÊNCIA PARA O LIMITE DE 40%)
+    // Para planos reduzidos, a parcela raw é pequena. Usamos a cheia para calcular o teto de 40%,
+    // evitando que o teto fique muito baixo e congele a redução.
+    const parcelaCheiaReferencia = parcelaPre / fatorPlano;
+    const limiteReducaoBase = parcelaCheiaReferencia * 0.40;
     
     if (tableMeta.plan === 'NORMAL') {
-        // === LÓGICA ORIGINAL DO PLANO NORMAL (INALTERADA) ===
         const creditoLiquido = credito - lanceEmbutidoValor - lanceCartaVal;
         const custoTotal = creditoLiquido + taxaAdminValor + fundoReservaValor + totalSeguro;
 
@@ -189,7 +204,8 @@ export class ConsortiumCalculator {
             creditoLiquido,
             prazo,
             lanceTotal,
-            0 // Saldo Devedor Reajuste é 0 no Normal
+            0,
+            limiteReducaoBase // Teto normal
         );
 
         return {
@@ -206,54 +222,58 @@ export class ConsortiumCalculator {
           plano: tableMeta.plan,
           lanceCartaVal,
           cenariosContemplacao,
-          // Campos LIGHT/SL nulos
           cenarioCreditoReduzido: null,
           cenarioCreditoTotal: null,
           parcelaPosCaminho2: 0
         };
 
     } else {
-        // === LÓGICA PLANOS LIGHT (75%) E SUPERLIGHT (50%) ===
-        let fatorPlano = 0.75; // LIGHT
-        if (tableMeta.plan === 'SUPERLIGHT') fatorPlano = 0.50;
+        // === PLANOS LIGHT E SUPERLIGHT ===
 
-        // CAMINHO 1: Crédito Reduzido, Mesma Parcela
+        // CAMINHO 1: Crédito Reduzido
         const creditoBaseReduzido = credito * fatorPlano;
         const creditoLiquidoReduzido = creditoBaseReduzido - lanceEmbutidoValor - lanceCartaVal;
         
-        const cenarioReduzido = ConsortiumCalculator.calculateAmortizationScenario(
-            input,
-            parcelaPre, // Mantém parcela original
-            creditoLiquidoReduzido,
-            prazo,
-            lanceTotal,
-            0 // Não há reajuste de saldo no Caminho 1
-        );
+        let cenarioReduzido: ContemplationScenario[] | null = null;
 
-        // CAMINHO 2: Crédito Cheio, Parcela Reajustada dinamicamente
+        if (creditoLiquidoReduzido > 0) {
+             cenarioReduzido = ConsortiumCalculator.calculateAmortizationScenario(
+                input,
+                parcelaPre, 
+                creditoLiquidoReduzido,
+                prazo,
+                lanceTotal,
+                0, // Sem gap no Caminho 1
+                limiteReducaoBase // Teto baseado na parcela cheia (destrava o congelamento)
+            );
+        }
+
+        // CAMINHO 2: Crédito Cheio (Parcela Reajustada)
         const creditoLiquidoCheio = credito - lanceEmbutidoValor - lanceCartaVal;
-        
-        // Cálculo do GAP (Acréscimo de Saldo Devedor)
-        // Ex: Crédito 100k, Superlight (50%). Já paga por 50k. Faltam 50k.
-        // Gap = 100k * (1 - 0.5) = 50k.
         const diferencaCredito = credito * (1 - fatorPlano);
         
-        // Calculamos a parcela "exibida" na tela de resumo (baseada no mês de contemplação inputado ou mês 1)
+        const cenarioCheio = ConsortiumCalculator.calculateAmortizationScenario(
+            input,
+            parcelaPre, 
+            creditoLiquidoCheio,
+            prazo,
+            lanceTotal,
+            diferencaCredito, // Passa o GAP para diluição
+            limiteReducaoBase // Teto base (será ajustado dinamicamente se a parcela crescer)
+        );
+
+        // Display estático
         const mesRef = input.mesContemplacao > 0 ? input.mesContemplacao : 1;
         const prazoRestanteRef = Math.max(1, prazo - mesRef);
         const acrescimoRef = diferencaCredito / prazoRestanteRef;
         const parcelaReajustadaDisplay = parcelaPre + acrescimoRef;
-
-        const cenarioCheio = ConsortiumCalculator.calculateAmortizationScenario(
-            input,
-            parcelaPre, // Passamos a parcela ORIGINAL base...
-            creditoLiquidoCheio,
-            prazo,
-            lanceTotal,
-            diferencaCredito // ...e o valor TOTAL a ser reajustado. A função diluirá isso mês a mês.
-        );
         
-        const custoTotalBase = creditoLiquidoReduzido + taxaAdminValor + fundoReservaValor + totalSeguro;
+        const custoTotalBase = (cenarioReduzido) 
+            ? creditoLiquidoReduzido + taxaAdminValor + fundoReservaValor + totalSeguro
+            : creditoLiquidoCheio + taxaAdminValor + fundoReservaValor + totalSeguro;
+
+        const creditoLiquidoDefault = (cenarioReduzido) ? creditoLiquidoReduzido : creditoLiquidoCheio;
+        const cenarioDefault = (cenarioReduzido) ? cenarioReduzido : cenarioCheio;
 
         return {
             parcelaPreContemplacao: parcelaPre,
@@ -264,16 +284,15 @@ export class ConsortiumCalculator {
             valorAdesao,
             totalPrimeiraParcela,
             creditoOriginal: credito,
-            creditoLiquido: creditoLiquidoReduzido, 
+            creditoLiquido: creditoLiquidoDefault, 
             lanceTotal,
             plano: tableMeta.plan,
             lanceCartaVal,
-            cenariosContemplacao: cenarioReduzido, 
+            cenariosContemplacao: cenarioDefault, 
             
-            // Preenchendo os cenários específicos
             cenarioCreditoReduzido: cenarioReduzido,
             cenarioCreditoTotal: cenarioCheio,
-            parcelaPosCaminho2: parcelaReajustadaDisplay // Usado para exibição inicial se necessário
+            parcelaPosCaminho2: parcelaReajustadaDisplay 
         };
     }
   }
@@ -287,15 +306,11 @@ export class ConsortiumCalculator {
     const lanceEmbVal = input.credito * input.lanceEmbutidoPct;
     const totalLances = input.lanceBolso + lanceEmbVal + input.lanceCartaVal;
     
-    // Validação conservadora baseada no crédito reduzido
-    let baseCreditoValidacao = input.credito;
-    if (tableMeta.plan === 'LIGHT') baseCreditoValidacao = input.credito * 0.75;
-    if (tableMeta.plan === 'SUPERLIGHT') baseCreditoValidacao = input.credito * 0.50;
-
-    const creditoQueSobra = baseCreditoValidacao - lanceEmbVal - input.lanceCartaVal;
+    // Validação contra Crédito Total (Caminho 2)
+    const creditoTotalLiquido = input.credito - lanceEmbVal - input.lanceCartaVal;
     
-    if (creditoQueSobra < 0) {
-       return `Atenção: Com esse lance embutido e/ou carta, o crédito líquido a receber no plano ${tableMeta.plan} (Caminho 1) seria negativo ou zero.`;
+    if (creditoTotalLiquido < 0) {
+       return `Atenção: A soma dos lances (Embutido + Carta + Bolso) supera o valor total do crédito. Simulação inviável.`;
     }
 
     if (totalLances >= input.credito) {
