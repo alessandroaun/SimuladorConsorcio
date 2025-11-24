@@ -1,10 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context'; 
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { ArrowLeft, Share2, CheckCircle2, Car, CalendarClock, AlertTriangle, Ban } from 'lucide-react-native';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+
 import { RootStackParamList } from '../types/navigation';
 import { ContemplationScenario } from '../utils/ConsortiumCalculator';
+import { generateHTML } from '../utils/GeneratePDFHtml';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Result'>;
 
@@ -13,19 +17,34 @@ type ScenarioMode = 'REDUZIDO' | 'CHEIO';
 export default function ResultScreen({ route, navigation }: Props) {
   const { result, input } = route.params;
   
-  // Verifica se o Caminho 1 é viável (não é null, conforme definido no Calculator)
+  // Verifica se o Caminho 1 é viável (não é null)
   const isCaminho1Viable = result.cenarioCreditoReduzido !== null;
 
   // Estado para controlar qual caminho o usuário está vendo
-  // LÓGICA: Se o Caminho 1 não for viável (ex: lances estouraram o crédito reduzido), 
-  // inicia forçadamente no CHEIO (Caminho 2).
   const [mode, setMode] = useState<ScenarioMode>(isCaminho1Viable ? 'REDUZIDO' : 'CHEIO');
 
   const isSpecialPlan = result.plano === 'LIGHT' || result.plano === 'SUPERLIGHT';
   const fatorPlano = result.plano === 'LIGHT' ? 0.75 : result.plano === 'SUPERLIGHT' ? 0.50 : 1.0;
 
-  const handleExport = () => {
-    Alert.alert("Exportar", "Funcionalidade de PDF será implementada aqui.");
+  // --- FUNÇÃO DE EXPORTAR PDF ---
+  const handleExport = async () => {
+    try {
+      // 1. Gera o HTML baseado nos dados atuais e no modo selecionado (Reduzido/Cheio)
+      const html = generateHTML(result, input, mode);
+
+      // 2. Cria o arquivo PDF
+      const { uri } = await Print.printToFileAsync({ html });
+      
+      // 3. Compartilha o arquivo
+      if (Platform.OS === "ios" || Platform.OS === "android") {
+          await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+      } else {
+          Alert.alert("Sucesso", "PDF gerado (Web não suporta compartilhamento nativo direto neste demo).");
+      }
+    } catch (error) {
+      console.error(error);
+      Alert.alert("Erro", "Não foi possível gerar o PDF.");
+    }
   };
 
   const formatBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -40,17 +59,17 @@ export default function ResultScreen({ route, navigation }: Props) {
   if (isSpecialPlan && result.cenarioCreditoTotal) { 
       // Verifica se estamos no modo REDUZIDO e se ele é realmente viável
       if (mode === 'REDUZIDO' && isCaminho1Viable && result.cenarioCreditoReduzido) {
-          // Caminho 1: Crédito Reduzido, Parcela Original
+          // Caminho 1: Crédito Reduzido
           activeScenario = result.cenarioCreditoReduzido;
           creditoExibido = activeScenario[0].creditoEfetivo; 
       } else {
-          // Caminho 2: Crédito Cheio (ou fallback obrigatório se 1 estiver bloqueado)
+          // Caminho 2: Crédito Cheio
           activeScenario = result.cenarioCreditoTotal;
           creditoExibido = activeScenario[0].creditoEfetivo;
           isReajustado = true;
       }
   } else {
-      // Plano NORMAL (Sem bifurcação)
+      // Plano NORMAL
       activeScenario = result.cenariosContemplacao;
       creditoExibido = result.creditoLiquido;
   }
@@ -65,7 +84,9 @@ export default function ResultScreen({ route, navigation }: Props) {
           <ArrowLeft color="#0F172A" size={24} />
         </TouchableOpacity>
         <Text style={styles.navTitle}>Resultado da Simulação</Text>
-        <TouchableOpacity onPress={handleExport}>
+        
+        {/* BOTÃO DE COMPARTILHAR ATIVO */}
+        <TouchableOpacity onPress={handleExport} style={styles.shareBtn}>
           <Share2 color="#0EA5E9" size={24} />
         </TouchableOpacity>
       </View>
@@ -88,7 +109,6 @@ export default function ResultScreen({ route, navigation }: Props) {
                 )}
 
                 <View style={styles.toggleRow}>
-                    {/* BOTÃO CAMINHO 1 (Pode estar desabilitado) */}
                     <TouchableOpacity 
                         style={[
                             styles.toggleBtn, 
@@ -108,7 +128,6 @@ export default function ResultScreen({ route, navigation }: Props) {
                         </Text>
                     </TouchableOpacity>
 
-                    {/* BOTÃO CAMINHO 2 (Sempre habilitado se chegou aqui) */}
                     <TouchableOpacity 
                         style={[styles.toggleBtn, mode === 'CHEIO' && styles.toggleBtnActive]}
                         onPress={() => setMode('CHEIO')}
@@ -130,7 +149,7 @@ export default function ResultScreen({ route, navigation }: Props) {
                     </Text>
                 </View>
 
-                {/* ALERTA ESPECÍFICO SUPERLIGHT CAMINHO 1 (Apenas se estiver ativo e visível) */}
+                {/* ALERTA ESPECÍFICO SUPERLIGHT CAMINHO 1 */}
                 {result.plano === 'SUPERLIGHT' && mode === 'REDUZIDO' && isCaminho1Viable && (
                     <View style={styles.riskAlert}>
                         <AlertTriangle color="#B91C1C" size={20} />
@@ -174,7 +193,6 @@ export default function ResultScreen({ route, navigation }: Props) {
                 {isSpecialPlan ? `Crédito Base (${mode === 'REDUZIDO' ? fatorPlano*100 : '100'}%)` : 'Crédito Contratado'}
             </Text>
             <Text style={styles.statValue}>
-                {/* Mostra o Crédito Bruto (antes dos lances) correspondente ao modo */}
                 {formatBRL(mode === 'REDUZIDO' && isSpecialPlan ? result.creditoOriginal * fatorPlano : result.creditoOriginal)}
             </Text>
           </View>
@@ -361,7 +379,8 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
   navHeader: { flexDirection: 'row', alignItems: 'center', padding: 16, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
   backBtn: { padding: 8, marginRight: 8 },
-  navTitle: { fontSize: 18, fontWeight: '600', color: '#0F172A' },
+  navTitle: { fontSize: 18, fontWeight: '600', color: '#0F172A', flex: 1 },
+  shareBtn: { padding: 8 },
   scrollContent: { padding: 16, paddingBottom: 40 },
   
   highlightBox: { 
