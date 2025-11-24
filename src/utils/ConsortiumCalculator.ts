@@ -57,7 +57,8 @@ export class ConsortiumCalculator {
 
   /**
    * Função auxiliar para calcular o cenário de amortização.
-   * Agora aceita 'limiteReducaoMensal' (R$) calculado externamente para garantir consistência.
+   * Corrigido: Garante fluxo correto do lance excedente para o prazo quando o teto da parcela é atingido, 
+   * especialmente em planos de parcela fixa (NORMAL ou Caminho 1).
    */
   private static calculateAmortizationScenario(
     input: SimulationInput, 
@@ -71,96 +72,150 @@ export class ConsortiumCalculator {
     
     const { percentualLanceParaParcela, mesContemplacao } = input;
     const cenarios: ContemplationScenario[] = [];
-    const mesInicial = Math.max(1, mesContemplacao > 0 ? mesContemplacao : 1);
+    
+    // Mes inicial base (onde o usuário diz que será contemplado)
+    const mesContemplacaoNum = Math.max(1, mesContemplacao > 0 ? mesContemplacao : 1);
 
     const prazoTotalNum = Number(prazoTotal);
     const lanceTotalNum = Math.max(0, Number(lanceTotal));
     const saldoReajusteNum = Math.max(0, Number(saldoDevedorReajuste));
     const pctParcelaNum = Math.max(0, Math.min(100, Number(percentualLanceParaParcela) || 0));
 
-    // Loop para gerar 5 cenários (mês X, X+1, X+2...)
+    // --- PASSO 1: SIMULAR O CENÁRIO NO MÊS DA CONTEMPLAÇÃO PARA DESCOBRIR QUANDO O PLANO ACABA ---
+    // Precisamos saber o "Novo Prazo" resultante logo após o lance ser aplicado no mês de contemplação.
+    
+    let prazoRestanteNoMomentoDoLance = Math.max(1, prazoTotalNum - mesContemplacaoNum);
+    let parcelaBaseNoMomentoDoLance = baseParcelaOriginal;
+    
+    if (saldoDevedorReajuste > 0.0001) {
+       const acrescimoMensal = saldoReajusteNum / prazoRestanteNoMomentoDoLance;
+       parcelaBaseNoMomentoDoLance = baseParcelaOriginal + acrescimoMensal;
+    }
+
+    let novoPrazoPosLance = prazoRestanteNoMomentoDoLance;
+    let novaParcelaPosLance = parcelaBaseNoMomentoDoLance;
+    let infoAmortizacaoFinal = "";
+
+    if (lanceTotalNum > 0.01) {
+        // Lógica de cálculo (Igual à anterior, mas usada apenas para prever o fim)
+        const valorLanceParaParcelaIntencional = lanceTotalNum * (pctParcelaNum / 100);
+        const reducaoMensalIntencional = valorLanceParaParcelaIntencional / prazoRestanteNoMomentoDoLance;
+        const tetoDinamico = Math.max(limiteReducaoMensal, parcelaBaseNoMomentoDoLance * 0.40);
+        const reducaoMensalEfetiva = Math.min(reducaoMensalIntencional, tetoDinamico);
+        
+        novaParcelaPosLance = parcelaBaseNoMomentoDoLance - reducaoMensalEfetiva;
+        
+        const lanceConsumidoNaParcela = reducaoMensalEfetiva * prazoRestanteNoMomentoDoLance;
+        const lanceTotalOriginal = lanceTotalNum;
+        const valorLanceParaPrazoIntencional = lanceTotalOriginal * ( (100 - pctParcelaNum) / 100 );
+        const sobraDoLanceParcela = Math.max(0, valorLanceParaParcelaIntencional - lanceConsumidoNaParcela);
+        const totalDisponivelParaPrazo = valorLanceParaPrazoIntencional + sobraDoLanceParcela;
+        
+        let parcelasAbatidas = 0;
+        if (novaParcelaPosLance > 0.01) {
+            parcelasAbatidas = totalDisponivelParaPrazo / novaParcelaPosLance;
+        } else {
+            parcelasAbatidas = prazoRestanteNoMomentoDoLance;
+        }
+        
+        novoPrazoPosLance = Math.max(0, prazoRestanteNoMomentoDoLance - parcelasAbatidas);
+
+        // Define string de info
+        if (novoPrazoPosLance < 0.1) infoAmortizacaoFinal = "Quitado";
+        else if (Math.abs(reducaoMensalEfetiva - tetoDinamico) < 0.01) infoAmortizacaoFinal = "Red. Máx. Parcela (40%) + Red. Prazo";
+        else if (reducaoMensalEfetiva > 0.01) infoAmortizacaoFinal = `Red. Parcela (${pctParcelaNum.toFixed(0)}%) + Red. Prazo`;
+        else infoAmortizacaoFinal = "Red. Prazo (100% do Lance)";
+    }
+
+    // --- PASSO 2: DEFINIR A JANELA DE VISUALIZAÇÃO ---
+    // O mês final efetivo do plano é o Mês da Contemplação + Novo Prazo (arredondado para cima)
+    const mesFinalEfetivo = Math.ceil(mesContemplacaoNum + novoPrazoPosLance);
+    
+    // Queremos mostrar 5 meses. A janela ideal termina no mesFinalEfetivo.
+    // Ex: Se paga tudo no mês 34 (mesContemplacao 33 + 1 prazo), queremos ver: 30, 31, 32, 33, 34.
+    // O 'end' do loop deve ser mesFinalEfetivo.
+    // O 'start' do loop deve ser mesFinalEfetivo - 4.
+    // Mas o 'start' não pode ser menor que 1.
+    // E também, se o mesFinalEfetivo for muito longe (ex: mes 80), e a contemplação foi no 33, 
+    // a janela deve começar no 33 (comportamento padrão).
+    // REGRA: Se (mesContemplacao + 5) ultrapassa mesFinalEfetivo, então ajustamos a janela para terminar em mesFinalEfetivo.
+    
+    let loopStart = mesContemplacaoNum;
+    
+    // Se a visualização padrão (começando no mês de contemplação) mostraria muitos "0x" (porque acabou antes),
+    // empurramos a janela para trás.
+    if (loopStart + 4 > mesFinalEfetivo) {
+        loopStart = Math.max(1, mesFinalEfetivo - 4);
+    }
+
+    // --- PASSO 3: GERAR AS 5 LINHAS ---
     for (let i = 0; i < 5; i++) {
-      const mesAtual = mesInicial + i;
-      
-      if (mesAtual >= prazoTotalNum) break;
-
-      // Prazo restante para este cenário específico
-      const prazoTotalRestante = Math.max(1, prazoTotalNum - mesAtual); 
-      
-      // 1. CÁLCULO DA PARCELA BASE
-      let parcelaBaseParaCalculo = baseParcelaOriginal;
-      
-      // No Caminho 2, adicionamos o Gap diluído
-      if (saldoReajusteNum > 0.01) {
-          const acrescimoMensal = saldoReajusteNum / prazoTotalRestante;
-          parcelaBaseParaCalculo = baseParcelaOriginal + acrescimoMensal;
-      }
-
-      let novaParcela = parcelaBaseParaCalculo;
-      let novoPrazo = prazoTotalRestante;
-      let parcelasAbatidas = 0;
-      let amortizacaoInfo = "";
-      let reducaoMensalEfetiva = 0;
-
-      // 2. APLICAÇÃO DO LANCE
-      if (lanceTotalNum > 0.01) {
-        const valorLanceParaParcela = lanceTotalNum * (pctParcelaNum / 100);
-        const valorLanceParaPrazo = lanceTotalNum - valorLanceParaParcela;
-
-        // -- Redução na Parcela --
-        // A redução é limitada pelo 'limiteReducaoMensal' passado (40% da Parcela Cheia ou Ajustada)
-        // No Caminho 2, como a parcela base cresce, recalculamos o teto se ele for maior que o fixo,
-        // mas para Caminho 1 usamos o teto baseado na cheia para evitar congelamento.
+        const mesAtual = loopStart + i;
         
-        // Lógica de Teto Híbrida:
-        // O teto é 40% da parcela VIGENTE ou o limiteReference passado (que é 40% da Cheia), o que for MAIOR.
-        // Isso garante que no Caminho 1 destrave (usando a Cheia) e no Caminho 2 acompanhe o crescimento (usando a Vigente).
-        const tetoDinamico = Math.max(limiteReducaoMensal, parcelaBaseParaCalculo * 0.40);
+        // Se já passamos do mês final efetivo, paramos de gerar linhas para não mostrar "Quitado" repetido,
+        // OU se o usuário pediu estritamente 5 meses e já ajustamos a janela, esse caso deve ser raro,
+        // mas garantimos que pare se exceder o prazo total original.
+        if (mesAtual > prazoTotalNum && mesAtual > mesFinalEfetivo) break;
 
-        const reducaoMensalIntencional = valorLanceParaParcela / prazoTotalRestante;
-        
-        // Aplica o teto
-        reducaoMensalEfetiva = Math.min(reducaoMensalIntencional, tetoDinamico);
-        
-        const lanceConsumidoNaParcela = reducaoMensalEfetiva * prazoTotalRestante;
-        
-        novaParcela = parcelaBaseParaCalculo - reducaoMensalEfetiva;
+        // Objeto de cenário
+        let cenario: ContemplationScenario;
 
-        // -- Redução no Prazo --
-        const sobraDoLanceParcela = Math.max(0, valorLanceParaParcela - lanceConsumidoNaParcela);
-        const totalDisponivelParaPrazo = valorLanceParaPrazo + sobraDoLanceParcela;
+        // CASO A: Mês Anterior à Contemplação (Só acontece se a janela foi empurrada para trás)
+        if (mesAtual < mesContemplacaoNum) {
+            // Antes do lance, é tudo "Normal"
+            const prazoRestantePre = prazoTotalNum - mesAtual;
+            cenario = {
+                mes: mesAtual,
+                mesRelativo: i + 1, // Apenas índice visual
+                novoPrazo: prazoRestantePre,
+                novaParcela: baseParcelaOriginal,
+                parcelasAbatidas: 0,
+                amortizacaoInfo: "Pré-Lance",
+                creditoEfetivo: creditoEfetivoBase
+            };
+        } 
+        // CASO B: Mês da Contemplação ou Futuro (Pós-Lance)
+        else {
+             // Se o mês atual já passou do mês final calculado (ex: mês 35 quando acabou no 34)
+             if (mesAtual > mesFinalEfetivo || (Math.abs(novoPrazoPosLance) < 0.1 && mesAtual > mesContemplacaoNum)) {
+                 cenario = {
+                    mes: mesAtual,
+                    mesRelativo: i + 1,
+                    novoPrazo: 0,
+                    novaParcela: 0,
+                    parcelasAbatidas: 0,
+                    amortizacaoInfo: "Quitado",
+                    creditoEfetivo: creditoEfetivoBase
+                 };
+             } else {
+                 // É o mês do lance ou meses seguintes ativos
+                 // O novo prazo vai decaindo mês a mês a partir do cálculo do lance
+                 const mesesPassadosDesdeLance = mesAtual - mesContemplacaoNum;
+                 const prazoRestanteDinamico = Math.max(0, novoPrazoPosLance - mesesPassadosDesdeLance);
+                 
+                 cenario = {
+                    mes: mesAtual,
+                    mesRelativo: i + 1,
+                    novoPrazo: prazoRestanteDinamico,
+                    novaParcela: novaParcelaPosLance,
+                    parcelasAbatidas: 0, // Valor informativo estático do momento do lance
+                    amortizacaoInfo: infoAmortizacaoFinal,
+                    creditoEfetivo: creditoEfetivoBase
+                 };
+             }
+        }
         
-        if (novaParcela > 0.01) {
-            parcelasAbatidas = totalDisponivelParaPrazo / novaParcela;
-        } else {
-            parcelasAbatidas = prazoTotalRestante;
+        // Pequena limpeza: Se geramos uma linha "Quitado", garantimos que seja a última se o loop permitir,
+        // mas a lógica da janela (loopStart) já tenta manter ela na 5ª posição.
+        // Se por acaso gerarmos múltiplas linhas de "Quitado" (ex: mesFinal=2, loopStart=1 -> 1, 2, 3(0x), 4(0x)...),
+        // filtramos visualmente ou deixamos. O pedido foi "apenas 1 mês 0x".
+        // Vamos forçar break se o ANTERIOR já era quitado.
+        if (cenarios.length > 0 && cenarios[cenarios.length - 1].novoPrazo === 0 && cenario.novoPrazo === 0) {
+            // Já mostramos uma linha de 0x, não mostra mais.
+            break; 
         }
 
-        novoPrazo = Math.max(0, prazoTotalRestante - parcelasAbatidas);
-        
-        // -- Info --
-        if (novoPrazo < 0.1) {
-             amortizacaoInfo = "Quitado";
-        } else if (reducaoMensalEfetiva >= tetoDinamico - 0.01) {
-             amortizacaoInfo = "Red. Máx. Parcela (40%) + Red. Prazo";
-        } else if (reducaoMensalEfetiva > 0.01) {
-             amortizacaoInfo = `Red. Parcela (${pctParcelaNum.toFixed(0)}%) + Red. Prazo`;
-        } else {
-             amortizacaoInfo = "Red. Prazo (100% do Lance)";
-        }
-      } else {
-        amortizacaoInfo = "Sem Lance";
-      }
-      
-      cenarios.push({
-        mes: mesAtual,
-        mesRelativo: i + 1,
-        novoPrazo, 
-        novaParcela,
-        parcelasAbatidas,
-        amortizacaoInfo,
-        creditoEfetivo: creditoEfetivoBase
-      });
+        cenarios.push(cenario);
     }
 
     return cenarios;
@@ -189,8 +244,6 @@ export class ConsortiumCalculator {
     if (tableMeta.plan === 'SUPERLIGHT') fatorPlano = 0.50;
 
     // CÁLCULO DA PARCELA CHEIA (REFERÊNCIA PARA O LIMITE DE 40%)
-    // Para planos reduzidos, a parcela raw é pequena. Usamos a cheia para calcular o teto de 40%,
-    // evitando que o teto fique muito baixo e congele a redução.
     const parcelaCheiaReferencia = parcelaPre / fatorPlano;
     const limiteReducaoBase = parcelaCheiaReferencia * 0.40;
     
@@ -205,7 +258,7 @@ export class ConsortiumCalculator {
             prazo,
             lanceTotal,
             0,
-            limiteReducaoBase // Teto normal
+            limiteReducaoBase 
         );
 
         return {
@@ -243,12 +296,12 @@ export class ConsortiumCalculator {
                 creditoLiquidoReduzido,
                 prazo,
                 lanceTotal,
-                0, // Sem gap no Caminho 1
-                limiteReducaoBase // Teto baseado na parcela cheia (destrava o congelamento)
+                0, 
+                limiteReducaoBase
             );
         }
 
-        // CAMINHO 2: Crédito Cheio (Parcela Reajustada)
+        // CAMINHO 2: Crédito Cheio
         const creditoLiquidoCheio = credito - lanceEmbutidoValor - lanceCartaVal;
         const diferencaCredito = credito * (1 - fatorPlano);
         
@@ -258,11 +311,10 @@ export class ConsortiumCalculator {
             creditoLiquidoCheio,
             prazo,
             lanceTotal,
-            diferencaCredito, // Passa o GAP para diluição
-            limiteReducaoBase // Teto base (será ajustado dinamicamente se a parcela crescer)
+            diferencaCredito,
+            limiteReducaoBase 
         );
 
-        // Display estático
         const mesRef = input.mesContemplacao > 0 ? input.mesContemplacao : 1;
         const prazoRestanteRef = Math.max(1, prazo - mesRef);
         const acrescimoRef = diferencaCredito / prazoRestanteRef;
@@ -306,7 +358,7 @@ export class ConsortiumCalculator {
     const lanceEmbVal = input.credito * input.lanceEmbutidoPct;
     const totalLances = input.lanceBolso + lanceEmbVal + input.lanceCartaVal;
     
-    // Validação contra Crédito Total (Caminho 2)
+    // Validação contra Crédito Total
     const creditoTotalLiquido = input.credito - lanceEmbVal - input.lanceCartaVal;
     
     if (creditoTotalLiquido < 0) {

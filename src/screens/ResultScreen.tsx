@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert, Platform, Dimensions, StatusBar } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context'; 
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { ArrowLeft, Share2, CheckCircle2, Car, CalendarClock, AlertTriangle, Ban } from 'lucide-react-native';
+import { ArrowLeft, Share2, CheckCircle2, Car, CalendarClock, AlertTriangle, Ban, DollarSign, Calendar, FileText, Info, RefreshCw } from 'lucide-react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 
@@ -13,6 +13,8 @@ import { generateHTML } from '../utils/GeneratePDFHtml';
 type Props = NativeStackScreenProps<RootStackParamList, 'Result'>;
 
 type ScenarioMode = 'REDUZIDO' | 'CHEIO';
+
+const { width } = Dimensions.get('window');
 
 export default function ResultScreen({ route, navigation }: Props) {
   const { result, input } = route.params;
@@ -29,17 +31,13 @@ export default function ResultScreen({ route, navigation }: Props) {
   // --- FUNÇÃO DE EXPORTAR PDF ---
   const handleExport = async () => {
     try {
-      // 1. Gera o HTML baseado nos dados atuais e no modo selecionado (Reduzido/Cheio)
       const html = generateHTML(result, input, mode);
-
-      // 2. Cria o arquivo PDF
       const { uri } = await Print.printToFileAsync({ html });
       
-      // 3. Compartilha o arquivo
       if (Platform.OS === "ios" || Platform.OS === "android") {
           await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
       } else {
-          Alert.alert("Sucesso", "PDF gerado (Web não suporta compartilhamento nativo direto neste demo).");
+          Alert.alert("Sucesso", "PDF gerado.");
       }
     } catch (error) {
       console.error(error);
@@ -48,7 +46,7 @@ export default function ResultScreen({ route, navigation }: Props) {
   };
 
   const formatBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-  const formatMeses = (v: number) => `${v.toFixed(1)} meses`;
+  const formatMeses = (v: number) => `${v.toFixed(0)} meses`;
 
   // --- SELEÇÃO DE DADOS COM BASE NO MODO ---
   let activeScenario: ContemplationScenario[];
@@ -57,19 +55,15 @@ export default function ResultScreen({ route, navigation }: Props) {
 
   // Lógica de Seleção de Cenário
   if (isSpecialPlan && result.cenarioCreditoTotal) { 
-      // Verifica se estamos no modo REDUZIDO e se ele é realmente viável
       if (mode === 'REDUZIDO' && isCaminho1Viable && result.cenarioCreditoReduzido) {
-          // Caminho 1: Crédito Reduzido
           activeScenario = result.cenarioCreditoReduzido;
           creditoExibido = activeScenario[0].creditoEfetivo; 
       } else {
-          // Caminho 2: Crédito Cheio
           activeScenario = result.cenarioCreditoTotal;
           creditoExibido = activeScenario[0].creditoEfetivo;
           isReajustado = true;
       }
   } else {
-      // Plano NORMAL
       activeScenario = result.cenariosContemplacao;
       creditoExibido = result.creditoLiquido;
   }
@@ -78,297 +72,301 @@ export default function ResultScreen({ route, navigation }: Props) {
   const lanceEmbutidoValor = result.lanceTotal - input.lanceBolso - result.lanceCartaVal;
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.navHeader}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
+      
+      {/* CABEÇALHO MODERNO */}
+      <View style={styles.header}>
+        <TouchableOpacity 
+          onPress={() => navigation.goBack()} 
+          style={styles.iconButton}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
           <ArrowLeft color="#0F172A" size={24} />
         </TouchableOpacity>
-        <Text style={styles.navTitle}>Resultado da Simulação</Text>
         
-        {/* BOTÃO DE COMPARTILHAR ATIVO */}
-        <TouchableOpacity onPress={handleExport} style={styles.shareBtn}>
-          <Share2 color="#0EA5E9" size={24} />
+        <Text style={styles.headerTitle}>Resultado</Text>
+        
+        <TouchableOpacity 
+          onPress={handleExport} 
+          style={styles.iconButton}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Share2 color="#2563EB" size={24} />
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         
-        {/* --- SELETOR DE CAMINHO (APENAS LIGHT/SUPERLIGHT) --- */}
-        {isSpecialPlan && (
-            <View style={styles.toggleContainer}>
-                <Text style={styles.toggleLabel}>Escolha o caminho pós-contemplação:</Text>
-                
-                {/* ALERTA DE BLOQUEIO DO CAMINHO 1 */}
-                {!isCaminho1Viable && (
-                   <View style={styles.pathBlockedAlert}>
-                      <Ban color="#EF4444" size={16} />
-                      <Text style={styles.pathBlockedText}>
-                        O Caminho 1 foi desabilitado pois seus lances excedem o crédito reduzido.
-                      </Text>
-                   </View>
-                )}
-
-                <View style={styles.toggleRow}>
-                    <TouchableOpacity 
-                        style={[
-                            styles.toggleBtn, 
-                            mode === 'REDUZIDO' && styles.toggleBtnActive,
-                            !isCaminho1Viable && styles.toggleBtnDisabled
-                        ]}
-                        onPress={() => isCaminho1Viable && setMode('REDUZIDO')}
-                        disabled={!isCaminho1Viable}
-                    >
-                        <Text style={[
-                            styles.toggleBtnText, 
-                            mode === 'REDUZIDO' && styles.toggleBtnTextActive,
-                            !isCaminho1Viable && styles.toggleBtnTextDisabled
-                        ]}>
-                            Caminho 1{'\n'}
-                            (Crédito {fatorPlano*100}%)
-                        </Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity 
-                        style={[styles.toggleBtn, mode === 'CHEIO' && styles.toggleBtnActive]}
-                        onPress={() => setMode('CHEIO')}
-                    >
-                        <Text style={[styles.toggleBtnText, mode === 'CHEIO' && styles.toggleBtnTextActive]}>
-                            Caminho 2{'\n'}
-                            (Crédito 100%)
-                        </Text>
-                    </TouchableOpacity>
-                </View>
-                
-                {/* DESCRIÇÃO DO CAMINHO SELECIONADO */}
-                <View style={styles.pathDescription}>
-                    <Text style={styles.pathDescText}>
-                        {mode === 'REDUZIDO' 
-                            ? `Você mantém a parcela atual, mas recebe apenas ${fatorPlano*100}% do crédito contratado (menos lances).`
-                            : `Você recebe 100% do crédito (menos lances), mas a parcela é reajustada para cobrir a diferença.`
-                        }
-                    </Text>
-                </View>
-
-                {/* ALERTA ESPECÍFICO SUPERLIGHT CAMINHO 1 */}
-                {result.plano === 'SUPERLIGHT' && mode === 'REDUZIDO' && isCaminho1Viable && (
-                    <View style={styles.riskAlert}>
-                        <AlertTriangle color="#B91C1C" size={20} />
-                        <Text style={styles.riskAlertText}>
-                            Atenção: No Superlight, o lance embutido reduz ainda mais seus 50% de crédito. Você pode acabar recebendo apenas 25% do valor total da carta.
-                        </Text>
-                    </View>
-                )}
-            </View>
-        )}
-
-        {/* --- CABEÇALHO: DESTAQUE PARA A 1ª PARCELA --- */}
-        <View style={styles.highlightBox}>
-            <View style={styles.rowBetween}>
-                <Text style={styles.highlightTitle}>VALOR DA 1ª PARCELA</Text>
-                <View style={styles.planBadgeInverse}>
+        {/* --- HERO CARD (PRIMEIRA PARCELA) --- */}
+        <View style={styles.heroCard}>
+            <View style={styles.heroHeader}>
+                <Text style={styles.heroLabel}>VALOR DA 1ª PARCELA</Text>
+                <View style={styles.planBadge}>
                     <Text style={styles.planBadgeText}>PLANO {result.plano}</Text>
                 </View>
             </View>
 
-            <Text style={styles.highlightValue}>{formatBRL(result.totalPrimeiraParcela)}</Text>
+            <Text style={styles.heroValue}>{formatBRL(result.totalPrimeiraParcela)}</Text>
 
-            {result.valorAdesao > 0 ? (
-                <View style={styles.adesaoRow}>
-                    <CheckCircle2 color="#4ADE80" size={18} style={{marginRight: 6}}/>
-                    <Text style={styles.highlightSubtitle}>
-                        Incluso: Parcela ({formatBRL(result.parcelaPreContemplacao)}) + Adesão ({formatBRL(result.valorAdesao)})
-                    </Text>
-                </View>
-            ) : (
-                <Text style={styles.highlightSubtitle}>
-                   Referente ao pagamento no ato (sem taxa de adesão).
-                </Text>
-            )}
+            <View style={styles.heroFooter}>
+                {result.valorAdesao > 0 ? (
+                    <View style={styles.heroCheckRow}>
+                        <CheckCircle2 color="#4ADE80" size={16} />
+                        <Text style={styles.heroFooterText}>
+                            Inclui Parcela ({formatBRL(result.parcelaPreContemplacao)}) + Adesão
+                        </Text>
+                    </View>
+                ) : (
+                    <Text style={styles.heroFooterText}>Pagamento referente à primeira mensalidade.</Text>
+                )}
+            </View>
         </View>
 
-        {/* Resumo Crédito/Prazo */}
-        <View style={styles.grid}>
-          <View style={styles.statBox}>
-            <Text style={styles.statLabel}>
-                {isSpecialPlan ? `Crédito Base (${mode === 'REDUZIDO' ? fatorPlano*100 : '100'}%)` : 'Crédito Contratado'}
+        {/* --- SELETOR DE CAMINHO (LIGHT/SUPERLIGHT) --- */}
+        {isSpecialPlan && (
+            <View style={styles.toggleContainer}>
+                <View style={styles.toggleHeader}>
+                    <Text style={styles.sectionTitle}>Opções Pós-Contemplação</Text>
+                    <Info size={16} color="#64748B" />
+                </View>
+
+                {/* ALERTA DE BLOQUEIO */}
+                {!isCaminho1Viable && (
+                   <View style={styles.blockedAlert}>
+                      <Ban color="#EF4444" size={16} />
+                      <Text style={styles.blockedText}>
+                        Caminho 1 indisponível: Lances excedem crédito reduzido.
+                      </Text>
+                   </View>
+                )}
+
+                <View style={styles.toggleTrack}>
+                    <TouchableOpacity 
+                        style={[
+                            styles.toggleOption, 
+                            mode === 'REDUZIDO' && styles.toggleOptionActive,
+                            !isCaminho1Viable && styles.toggleOptionDisabled
+                        ]}
+                        onPress={() => isCaminho1Viable && setMode('REDUZIDO')}
+                        disabled={!isCaminho1Viable}
+                        activeOpacity={0.8}
+                    >
+                        <Text style={[
+                            styles.toggleText, 
+                            mode === 'REDUZIDO' && styles.toggleTextActive,
+                            !isCaminho1Viable && styles.toggleTextDisabled
+                        ]}>
+                            Caminho 1 ({fatorPlano*100}%)
+                        </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity 
+                        style={[styles.toggleOption, mode === 'CHEIO' && styles.toggleOptionActive]}
+                        onPress={() => setMode('CHEIO')}
+                        activeOpacity={0.8}
+                    >
+                        <Text style={[styles.toggleText, mode === 'CHEIO' && styles.toggleTextActive]}>
+                            Caminho 2 (100%)
+                        </Text>
+                    </TouchableOpacity>
+                </View>
+                
+                <Text style={styles.toggleDescription}>
+                    {mode === 'REDUZIDO' 
+                        ? `Mantém a parcela original, recebendo crédito proporcional de ${(fatorPlano*100).toFixed(0)}%.`
+                        : `Recebe 100% do crédito, com reajuste na parcela para cobrir a diferença.`
+                    }
+                </Text>
+
+                {/* ALERTA SUPERLIGHT */}
+                {result.plano === 'SUPERLIGHT' && mode === 'REDUZIDO' && isCaminho1Viable && (
+                    <View style={styles.warningBox}>
+                        <AlertTriangle color="#B45309" size={16} />
+                        <Text style={styles.warningText}>
+                            Lance embutido reduz ainda mais o crédito de 50%.
+                        </Text>
+                    </View>
+                )}
+            </View>
+        )}
+
+        {/* --- GRID DE MÉTRICAS (CRÉDITO E PRAZO) --- */}
+        <View style={styles.metricsGrid}>
+          <View style={styles.metricCard}>
+            <View style={[styles.iconBubble, {backgroundColor: '#EFF6FF'}]}>
+                <DollarSign color="#2563EB" size={20} />
+            </View>
+            <Text style={styles.metricLabel}>
+                {isSpecialPlan ? `Crédito Base` : 'Crédito'}
             </Text>
-            <Text style={styles.statValue}>
+            <Text style={styles.metricValue}>
                 {formatBRL(mode === 'REDUZIDO' && isSpecialPlan ? result.creditoOriginal * fatorPlano : result.creditoOriginal)}
             </Text>
           </View>
-           <View style={styles.statBox}>
-            <Text style={styles.statLabel}>Prazo</Text>
-            <Text style={styles.statValue}>{input.prazo} meses</Text>
+
+          <View style={styles.metricCard}>
+            <View style={[styles.iconBubble, {backgroundColor: '#F0FDF4'}]}>
+                <Calendar color="#16A34A" size={20} />
+            </View>
+            <Text style={styles.metricLabel}>Prazo Total</Text>
+            <Text style={styles.metricValue}>{input.prazo} meses</Text>
           </View>
         </View>
 
-        {/* Lances */}
+        {/* --- ANÁLISE DE LANCES --- */}
         {result.lanceTotal > 0 && (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Análise de Contemplação</Text>
-            
-            <View style={styles.rowBetween}>
-              <Text style={styles.text}>Lance Ofertado (Total):</Text>
-              <Text style={[styles.textBold, {color: '#22C55E'}]}>{formatBRL(result.lanceTotal)}</Text>
+            <View style={styles.cardHeader}>
+                 <Text style={styles.cardTitle}>Análise do Lance</Text>
             </View>
             
-            <View style={styles.rowBetween}>
-              <Text style={styles.text}>% do Crédito Original:</Text>
-              <Text style={styles.textBold}>{((result.lanceTotal / result.creditoOriginal) * 100).toFixed(2)}%</Text>
-            </View>
-            
-            <View style={styles.subDetailBox}>
-                <Text style={styles.subDetailTitle}>Composição do Lance:</Text>
-                <View style={styles.rowBetween}>
-                    <Text style={styles.subDetailText}>• Recursos Próprios (Bolso):</Text>
-                    <Text style={styles.subDetailText}>{formatBRL(input.lanceBolso)}</Text>
+            <View style={styles.lanceHighlight}>
+                <View>
+                    <Text style={styles.lanceLabel}>Lance Total Ofertado</Text>
+                    <Text style={styles.lanceValueBig}>{formatBRL(result.lanceTotal)}</Text>
                 </View>
-                <View style={styles.rowBetween}>
-                    <Text style={styles.subDetailText}>• Lance Embutido (Do Crédito):</Text>
-                    <Text style={styles.subDetailText}>{formatBRL(lanceEmbutidoValor)}</Text>
-                </View>
-                <View style={styles.rowBetween}>
-                    <Text style={styles.subDetailText}>• Carta de Avaliação (Bem):</Text>
-                    <Text style={styles.subDetailText}>{formatBRL(result.lanceCartaVal)}</Text>
+                <View style={styles.lanceBadge}>
+                    <Text style={styles.lanceBadgeText}>{((result.lanceTotal / result.creditoOriginal) * 100).toFixed(1)}%</Text>
                 </View>
             </View>
             
-            <View style={styles.divider} />
-            
-            <View style={styles.rowBetween}>
-              <Text style={styles.text}>Crédito Líquido (Recebido):</Text>
-              <Text style={[styles.textBold, {fontSize: 16}]}>{formatBRL(creditoExibido)}</Text>
+            <View style={styles.lanceBreakdown}>
+                <View style={styles.breakdownRow}>
+                    <Text style={styles.breakdownLabel}>Recursos Próprios (Bolso)</Text>
+                    <Text style={styles.breakdownValue}>{formatBRL(input.lanceBolso)}</Text>
+                </View>
+                <View style={styles.divider} />
+                <View style={styles.breakdownRow}>
+                    <Text style={styles.breakdownLabel}>Lance Embutido (Do Crédito)</Text>
+                    <Text style={styles.breakdownValue}>{formatBRL(lanceEmbutidoValor)}</Text>
+                </View>
+                <View style={styles.divider} />
+                <View style={styles.breakdownRow}>
+                    <Text style={styles.breakdownLabel}>Carta Avaliação (Bem)</Text>
+                    <Text style={styles.breakdownValue}>{formatBRL(result.lanceCartaVal)}</Text>
+                </View>
             </View>
-            <Text style={styles.helperText}>
-                Valor disponível para compra do bem (Líquido final).
-            </Text>
             
+            <View style={styles.liquidBox}>
+                <View style={styles.rowBetween}>
+                    <Text style={styles.liquidLabel}>Crédito Líquido na Mão</Text>
+                    <Text style={styles.liquidValue}>{formatBRL(creditoExibido)}</Text>
+                </View>
+                <Text style={styles.liquidDesc}>Valor disponível para compra após descontos.</Text>
+            </View>
 
             {result.lanceCartaVal > 0 && (
-                <View style={styles.infoBox}>
-                    <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 6}}>
-                        <Car color="#0284C7" size={20} style={{marginRight: 8}}/>
-                        <Text style={styles.infoTitle}>Poder de Compra Real</Text>
+                <View style={styles.powerBox}>
+                    <View style={styles.rowStart}>
+                        <Car color="#0284C7" size={16} />
+                        <Text style={styles.powerTitle}>Poder de Compra Total</Text>
                     </View>
-                    
-                    <Text style={styles.infoText}>
-                        Ao ser contemplado, você receberá <Text style={{fontWeight:'bold'}}>{formatBRL(creditoExibido)}</Text> em dinheiro. 
-                        Somando ao seu bem ofertado ({formatBRL(result.lanceCartaVal)}), você compra um bem de valor total:
-                    </Text>
-
-                    <View style={styles.dividerLight} />
-                    
-                    <View style={styles.rowBetween}>
-                        <Text style={styles.infoTotalLabel}>Valor Total do Bem:</Text>
-                        <Text style={styles.infoTotalValue}>{formatBRL(creditoExibido + result.lanceCartaVal)}</Text>
-                    </View>
+                    <Text style={styles.powerValue}>{formatBRL(creditoExibido + result.lanceCartaVal)}</Text>
+                    <Text style={styles.powerDesc}>Soma do crédito líquido + valor do seu bem usado.</Text>
                 </View>
             )}
           </View>
         )}
 
-        {/* TABELA DE PREVISÃO PÓS-CONTEMPLAÇÃO */}
+        {/* --- PREVISÃO PÓS-CONTEMPLAÇÃO (TABELA) --- */}
         {cenarioPrincipal && (
             <View style={styles.card}>
-                <View style={styles.rowBetween}>
-                    <Text style={styles.cardTitle}>
-                        {isReajustado ? 'Previsão (Parcela Reajustada)' : 'Previsão Pós-Contemplação'}
-                    </Text>
+                <View style={[styles.cardHeader, {borderBottomWidth: 0}]}>
+                    <Text style={styles.cardTitle}>Simulação Pós-Contemplação</Text>
                     <CalendarClock color="#64748B" size={20} />
                 </View>
                 
-                {/* Aviso se a parcela foi reajustada (Caminho 2) */}
                 {isReajustado && (
-                    <View style={[styles.infoBox, {backgroundColor: '#FEFCE8', borderColor: '#FDE047', marginBottom: 12, marginTop: 0}]}>
-                        <Text style={[styles.infoText, {color: '#854D0E'}]}>
-                            Como você optou por 100% do crédito, a parcela foi reajustada para cobrir a diferença não paga anteriormente.
+                    <View style={styles.reajusteAlert}>
+                        <Text style={styles.reajusteText}>
+                            Parcela reajustada para cobrir diferença do Crédito Cheio.
                         </Text>
                     </View>
                 )}
 
-                <Text style={[styles.helperText, {marginBottom: 12}]}>
-                    Simulação para os 5 meses seguintes a partir da parcela {cenarioPrincipal.mes}º.
-                </Text>
-
-                {/* Resumo Abatimento */}
-                 {result.lanceTotal > 0 && (
-                    <View style={[styles.infoBox, {backgroundColor: '#ECFDF5', borderColor: '#A7F3D0', marginBottom: 12}]}>
-                         <View style={styles.rowBetween}>
-                            <Text style={[styles.text, {color: '#059669'}]}>Nova Parcela (Abatimento):</Text>
-                            <Text style={[styles.textBold, {color: '#059669', fontSize: 16}]}>{formatBRL(cenarioPrincipal.novaParcela)}</Text>
-                        </View>
-                        <View style={styles.rowBetween}>
-                            <Text style={[styles.text, {color: '#059669'}]}>Parcelas Abatidas:</Text>
-                            <Text style={[styles.textBold, {color: '#059669', fontSize: 16}]}>{cenarioPrincipal.parcelasAbatidas.toFixed(1)}x</Text>
-                        </View>
-                        <View style={styles.rowBetween}>
-                            <Text style={[styles.text, {color: '#059669'}]}>Novo Prazo Estimado:</Text>
-                            <Text style={[styles.textBold, {color: '#059669', fontSize: 16}]}>{formatMeses(cenarioPrincipal.novoPrazo)}</Text>
-                        </View>
+                {/* DESTAQUE PRINCIPAL DO CENÁRIO */}
+                {result.lanceTotal > 0 && (
+                    <View style={styles.scenarioHighlight}>
+                         <View style={styles.scenarioItem}>
+                            <Text style={styles.scenarioLabel}>Nova Parcela</Text>
+                            <Text style={styles.scenarioValueMain}>{formatBRL(cenarioPrincipal.novaParcela)}</Text>
+                         </View>
+                         <View style={styles.scenarioDivider} />
+                         <View style={styles.scenarioItem}>
+                            <Text style={styles.scenarioLabel}>Meses Abatidos</Text>
+                            <Text style={styles.scenarioValue}>{cenarioPrincipal.parcelasAbatidas.toFixed(1)}x</Text>
+                         </View>
                     </View>
                  )}
 
-
-                <View style={[styles.tableRowHeader, {backgroundColor: '#F1F5F9'}]}>
-                    <Text style={[styles.tableHeaderCol, {flex: 0.4}]}>Mês</Text>
-                    <Text style={[styles.tableHeaderCol, {flex: 1}]}>Parcela</Text>
-                    <Text style={[styles.tableHeaderCol, {flex: 1}]}>Novo Prazo</Text>
-                </View>
-
-                {activeScenario.map((cenario) => (
-                    <View key={cenario.mes} style={styles.tableRow}>
-                        <Text style={[styles.tableCell, {flex: 0.4, fontWeight: 'bold'}]}>{cenario.mes}º</Text>
-                        <Text style={[styles.tableCell, {flex: 1, color: '#15803D', fontWeight: 'bold'}]}>
-                            {formatBRL(cenario.novaParcela)}
-                        </Text>
-                        <Text style={[styles.tableCell, {flex: 1}]}>
-                            {/* Arredonda para exibição */}
-                            {Math.round(cenario.novoPrazo)}x
-                        </Text>
+                {/* TABELA LIMPA */}
+                <View style={styles.tableContainer}>
+                    <View style={styles.tableHeader}>
+                        <Text style={[styles.th, {flex: 0.5}]}>Mês</Text>
+                        <Text style={[styles.th, {flex: 1.2}]}>Parcela</Text>
+                        <Text style={[styles.th, {flex: 1, textAlign: 'right'}]}>Prazo Restante</Text>
                     </View>
-                ))}
+
+                    {activeScenario.map((cenario, index) => (
+                        <View key={cenario.mes} style={[styles.tr, index % 2 !== 0 && styles.trAlt]}>
+                            <Text style={[styles.td, {flex: 0.5, fontWeight: '600'}]}>{cenario.mes}º</Text>
+                            <Text style={[styles.td, {flex: 1.2, color: '#15803D', fontWeight: '700'}]}>
+                                {formatBRL(cenario.novaParcela)}
+                            </Text>
+                            <Text style={[styles.td, {flex: 1, textAlign: 'right'}]}>
+                                {Math.round(cenario.novoPrazo)}x
+                            </Text>
+                        </View>
+                    ))}
+                </View>
                 
-                <Text style={[styles.helperText, {marginTop: 8, fontSize: 10}]}>
-                   * Prazo exibido arredondado. Detalhe: {cenarioPrincipal.amortizacaoInfo}
+                <Text style={styles.tableFooter}>
+                   * Estimativa baseada na contemplação no mês {cenarioPrincipal.mes}.
                 </Text>
             </View>
         )}
 
-        {/* Detalhamento */}
+        {/* --- DETALHAMENTO --- */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Detalhamento Financeiro</Text>
-          <View style={styles.rowBetween}>
-            <Text style={styles.text}>Taxa Adm Total:</Text>
-            <Text style={styles.text}>{formatBRL(result.taxaAdminValor)}</Text>
-          </View>
-          <View style={styles.rowBetween}>
-            <Text style={styles.text}>Fundo Reserva:</Text>
-            <Text style={styles.text}>{formatBRL(result.fundoReservaValor)}</Text>
-          </View>
-           <View style={styles.rowBetween}>
-            <Text style={styles.text}>Seguro Mensal:</Text>
-            <Text style={styles.text}>{formatBRL(result.seguroMensal)}</Text>
+          <View style={styles.cardHeader}>
+             <Text style={styles.cardTitle}>Detalhamento Financeiro</Text>
+             <FileText color="#64748B" size={20} />
           </View>
           
-          <View style={styles.rowBetween}>
-             <Text style={styles.text}>Taxa de Adesão (Ato):</Text>
-             <Text style={styles.text}>{formatBRL(result.valorAdesao)}</Text>
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Taxa Adm Total</Text>
+            <Text style={styles.detailValue}>{formatBRL(result.taxaAdminValor)}</Text>
+          </View>
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Fundo Reserva</Text>
+            <Text style={styles.detailValue}>{formatBRL(result.fundoReservaValor)}</Text>
+          </View>
+           <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Seguro Mensal</Text>
+            <Text style={styles.detailValue}>{formatBRL(result.seguroMensal)}</Text>
+          </View>
+          <View style={styles.detailRow}>
+             <Text style={styles.detailLabel}>Taxa de Adesão</Text>
+             <Text style={styles.detailValue}>{formatBRL(result.valorAdesao)}</Text>
           </View>
           
-
-          <View style={styles.divider} />
-          <View style={styles.rowBetween}>
-            <Text style={styles.textBold}>Custo Total Previsto:</Text>
-            <Text style={styles.textBold}>{formatBRL(result.custoTotal)}</Text>
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>Custo Total Estimado</Text>
+            <Text style={styles.totalValue}>{formatBRL(result.custoTotal)}</Text>
           </View>
         </View>
 
+        {/* BOTÃO NOVA SIMULAÇÃO */}
         <TouchableOpacity 
-          style={[styles.mainBtn, {backgroundColor: 'transparent', borderWidth: 1, borderColor: '#0F172A', marginBottom: 20}]} 
+          style={styles.outlineButton} 
           onPress={() => navigation.popToTop()}
         >
-            <Text style={[styles.mainBtnText, {color: '#0F172A'}]}>NOVA SIMULAÇÃO</Text>
+            <RefreshCw color="#0F172A" size={20} style={{marginRight: 8}} />
+            <Text style={styles.outlineButtonText}>NOVA SIMULAÇÃO</Text>
         </TouchableOpacity>
+
+        <View style={{height: 20}} />
 
       </ScrollView>
     </SafeAreaView>
@@ -377,75 +375,127 @@ export default function ResultScreen({ route, navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
-  navHeader: { flexDirection: 'row', alignItems: 'center', padding: 16, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
-  backBtn: { padding: 8, marginRight: 8 },
-  navTitle: { fontSize: 18, fontWeight: '600', color: '#0F172A', flex: 1 },
-  shareBtn: { padding: 8 },
-  scrollContent: { padding: 16, paddingBottom: 40 },
   
-  highlightBox: { 
-      backgroundColor: '#0F172A', 
-      borderRadius: 16, 
-      padding: 20, 
-      marginBottom: 24, 
-      shadowColor: '#000', 
-      shadowOpacity: 0.2, 
-      shadowRadius: 5, 
-      elevation: 4 
+  // HEADER
+  header: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'space-between',
+    paddingHorizontal: 20, 
+    paddingVertical: 16, 
+    backgroundColor: '#F8FAFC' 
   },
-  highlightTitle: { color: '#94A3B8', fontWeight: '700', fontSize: 12, letterSpacing: 1, textTransform: 'uppercase' },
-  highlightValue: { color: '#fff', fontSize: 36, fontWeight: 'bold', marginVertical: 8 },
-  highlightSubtitle: { color: '#CBD5E1', fontSize: 13 },
-  planBadgeInverse: { backgroundColor: '#334155', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
-  planBadgeText: { color: '#fff', fontSize: 10, fontWeight: 'bold' },
-  adesaoRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4, backgroundColor: 'rgba(255,255,255,0.1)', padding: 8, borderRadius: 8 },
+  iconButton: { padding: 8, backgroundColor: '#F1F5F9', borderRadius: 12 },
+  headerTitle: { fontSize: 18, fontWeight: '700', color: '#0F172A' },
+  scrollContent: { paddingHorizontal: 20, paddingBottom: 40 },
 
-  grid: { flexDirection: 'row', gap: 12, marginBottom: 16 },
-  statBox: { flex: 1, backgroundColor: '#fff', padding: 16, borderRadius: 12, alignItems: 'center', elevation: 1 },
-  statLabel: { fontSize: 12, color: '#64748B' },
-  statValue: { fontSize: 16, fontWeight: 'bold', color: '#0F172A' },
-  card: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 16, elevation: 1 },
-  cardTitle: { fontSize: 16, fontWeight: '600', color: '#0F172A', marginBottom: 12 },
-  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  text: { fontSize: 14, color: '#334155' },
-  textBold: { fontSize: 14, fontWeight: 'bold', color: '#0F172A' },
-  divider: { height: 1, backgroundColor: '#E2E8F0', marginVertical: 12 },
-  helperText: { fontSize: 12, color: '#94A3B8', marginTop: 4, fontStyle: 'italic' },
-  mainBtn: { borderRadius: 12, padding: 16, alignItems: 'center' },
-  mainBtnText: { fontWeight: 'bold', fontSize: 16 },
-  
-  subDetailBox: { backgroundColor: '#F8FAFC', padding: 12, borderRadius: 8, marginTop: 8, borderWidth: 1, borderColor: '#F1F5F9' },
-  subDetailTitle: { fontSize: 12, fontWeight: 'bold', color: '#64748B', marginBottom: 8, textTransform: 'uppercase' },
-  subDetailText: { fontSize: 12, color: '#475569' },
-  
-  infoBox: { marginTop: 16, backgroundColor: '#F0F9FF', borderRadius: 8, padding: 16, borderWidth: 1, borderColor: '#BAE6FD' },
-  infoTitle: { color: '#0284C7', fontWeight: 'bold', fontSize: 14 },
-  infoText: { color: '#334155', fontSize: 13, lineHeight: 20 },
-  dividerLight: { height: 1, backgroundColor: '#BAE6FD', marginVertical: 12 },
-  infoTotalLabel: { color: '#0369A1', fontWeight: 'bold', fontSize: 14 },
-  infoTotalValue: { color: '#0369A1', fontWeight: 'bold', fontSize: 18 },
+  // HERO CARD
+  heroCard: {
+    backgroundColor: '#0F172A',
+    borderRadius: 24,
+    padding: 24,
+    marginBottom: 24,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  heroHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  heroLabel: { color: '#94A3B8', fontWeight: '700', fontSize: 12, letterSpacing: 1 },
+  planBadge: { backgroundColor: 'rgba(255,255,255,0.15)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  planBadgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  heroValue: { color: '#fff', fontSize: 38, fontWeight: '800', marginBottom: 16, letterSpacing: -1 },
+  heroFooter: { borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)', paddingTop: 12 },
+  heroCheckRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  heroFooterText: { color: '#CBD5E1', fontSize: 13, fontWeight: '500' },
 
-  tableRowHeader: { flexDirection: 'row', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#E2E8F0', borderRadius: 6 },
-  tableHeaderCol: { fontSize: 12, fontWeight: 'bold', color: '#64748B', textAlign: 'center' },
-  tableRow: { flexDirection: 'row', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
-  tableCell: { fontSize: 13, color: '#334155', textAlign: 'center' },
+  // TOGGLE SECTION
+  toggleContainer: { backgroundColor: '#fff', padding: 20, borderRadius: 20, marginBottom: 20, shadowColor: '#64748B', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 2 },
+  toggleHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#1E293B' },
+  
+  toggleTrack: { flexDirection: 'row', backgroundColor: '#F1F5F9', borderRadius: 12, padding: 4, marginBottom: 12 },
+  toggleOption: { flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 10 },
+  toggleOptionActive: { backgroundColor: '#fff', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 3, elevation: 2 },
+  toggleOptionDisabled: { opacity: 0.5 },
+  toggleText: { fontSize: 13, fontWeight: '600', color: '#64748B' },
+  toggleTextActive: { color: '#0F172A', fontWeight: '700' },
+  toggleTextDisabled: { color: '#94A3B8' },
+  
+  toggleDescription: { fontSize: 13, color: '#64748B', lineHeight: 20, textAlign: 'center', fontStyle: 'italic' },
+  
+  blockedAlert: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF2F2', padding: 10, borderRadius: 8, marginBottom: 12, gap: 8 },
+  blockedText: { color: '#EF4444', fontSize: 12, fontWeight: '600', flex: 1 },
+  
+  warningBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFBEB', padding: 10, borderRadius: 8, marginTop: 12, gap: 8, borderWidth: 1, borderColor: '#FEF3C7' },
+  warningText: { color: '#B45309', fontSize: 12, fontWeight: '600', flex: 1 },
 
-  // --- ESTILOS DO TOGGLE (NOVO) ---
-  toggleContainer: { backgroundColor: '#fff', padding: 16, borderRadius: 12, marginBottom: 16, elevation: 1 },
-  toggleLabel: { fontSize: 14, fontWeight: '600', color: '#0F172A', marginBottom: 12 },
-  toggleRow: { flexDirection: 'row', gap: 12 },
-  toggleBtn: { flex: 1, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#CBD5E1', alignItems: 'center', justifyContent: 'center', backgroundColor: '#F8FAFC' },
-  toggleBtnActive: { backgroundColor: '#0EA5E9', borderColor: '#0EA5E9' },
-  toggleBtnDisabled: { backgroundColor: '#E2E8F0', borderColor: '#E2E8F0', opacity: 0.6 },
-  toggleBtnText: { fontSize: 12, color: '#64748B', textAlign: 'center', fontWeight: '600' },
-  toggleBtnTextActive: { color: '#fff' },
-  toggleBtnTextDisabled: { color: '#94A3B8' },
+  // METRICS GRID
+  metricsGrid: { flexDirection: 'row', gap: 16, marginBottom: 20 },
+  metricCard: { flex: 1, backgroundColor: '#fff', padding: 16, borderRadius: 16, alignItems: 'center', shadowColor: '#64748B', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
+  iconBubble: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  metricLabel: { fontSize: 12, color: '#64748B', marginBottom: 4, fontWeight: '600' },
+  metricValue: { fontSize: 16, fontWeight: '800', color: '#0F172A' },
+
+  // GENERIC CARD
+  card: { backgroundColor: '#fff', borderRadius: 20, padding: 20, marginBottom: 20, shadowColor: '#64748B', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  cardTitle: { fontSize: 16, fontWeight: '700', color: '#1E293B' },
+
+  // LANCE STYLES
+  lanceHighlight: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  lanceLabel: { fontSize: 13, color: '#64748B', marginBottom: 4 },
+  lanceValueBig: { fontSize: 22, fontWeight: '800', color: '#16A34A' },
+  lanceBadge: { backgroundColor: '#F0FDF4', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  lanceBadgeText: { color: '#16A34A', fontWeight: '700', fontSize: 12 },
   
-  pathDescription: { marginTop: 12, padding: 12, backgroundColor: '#F1F5F9', borderRadius: 8 },
-  pathDescText: { fontSize: 13, color: '#334155', fontStyle: 'italic' },
-  riskAlert: { flexDirection: 'row', gap: 8, marginTop: 12, backgroundColor: '#FEF2F2', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#FECACA' },
-  riskAlertText: { flex: 1, fontSize: 12, color: '#B91C1C', fontWeight: '600' },
+  lanceBreakdown: { paddingVertical: 16 },
+  breakdownRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
+  breakdownLabel: { fontSize: 13, color: '#64748B' },
+  breakdownValue: { fontSize: 14, fontWeight: '600', color: '#334155' },
+  divider: { height: 1, backgroundColor: '#F1F5F9', marginVertical: 8 },
   
-  pathBlockedAlert: { flexDirection: 'row', gap: 8, marginBottom: 12, backgroundColor: '#FEF2F2', padding: 10, borderRadius: 8, alignItems: 'center' },
-  pathBlockedText: { flex: 1, fontSize: 12, color: '#EF4444', fontWeight: 'bold' },
+  liquidBox: { backgroundColor: '#F8FAFC', padding: 16, borderRadius: 12, marginTop: 8 },
+  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  liquidLabel: { fontSize: 14, fontWeight: '700', color: '#334155' },
+  liquidValue: { fontSize: 18, fontWeight: '800', color: '#0F172A' },
+  liquidDesc: { fontSize: 12, color: '#94A3B8', marginTop: 4 },
+  
+  powerBox: { marginTop: 12, backgroundColor: '#F0F9FF', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: '#BAE6FD' },
+  rowStart: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  powerTitle: { fontSize: 14, fontWeight: '700', color: '#0284C7' },
+  powerValue: { fontSize: 20, fontWeight: '800', color: '#0369A1' },
+  powerDesc: { fontSize: 12, color: '#0369A1', marginTop: 4, opacity: 0.8 },
+
+  // SCENARIO STYLES
+  reajusteAlert: { backgroundColor: '#FEFCE8', padding: 10, borderRadius: 8, marginBottom: 16, borderWidth: 1, borderColor: '#FEF3C7' },
+  reajusteText: { color: '#B45309', fontSize: 12, textAlign: 'center', fontWeight: '600' },
+  
+  scenarioHighlight: { flexDirection: 'row', backgroundColor: '#F0FDF4', padding: 16, borderRadius: 16, marginBottom: 20, borderWidth: 1, borderColor: '#DCFCE7' },
+  scenarioItem: { flex: 1, alignItems: 'center' },
+  scenarioDivider: { width: 1, backgroundColor: '#BBF7D0', marginHorizontal: 10 },
+  scenarioLabel: { fontSize: 11, color: '#15803D', textTransform: 'uppercase', fontWeight: '700', marginBottom: 4 },
+  scenarioValueMain: { fontSize: 20, color: '#15803D', fontWeight: '800' },
+  scenarioValue: { fontSize: 18, color: '#15803D', fontWeight: '700' },
+
+  tableContainer: { borderWidth: 1, borderColor: '#F1F5F9', borderRadius: 12, overflow: 'hidden' },
+  tableHeader: { flexDirection: 'row', backgroundColor: '#F8FAFC', padding: 12, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
+  th: { fontSize: 12, fontWeight: '700', color: '#64748B' },
+  tr: { flexDirection: 'row', padding: 12, backgroundColor: '#fff' },
+  trAlt: { backgroundColor: '#FAFAFA' },
+  td: { fontSize: 13, color: '#334155' },
+  tableFooter: { fontSize: 11, color: '#94A3B8', fontStyle: 'italic', marginTop: 12, textAlign: 'center' },
+
+  // DETAILS
+  detailRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  detailLabel: { fontSize: 14, color: '#64748B' },
+  detailValue: { fontSize: 14, fontWeight: '600', color: '#1E293B' },
+  totalRow: { flexDirection: 'row', justifyContent: 'space-between', paddingTop: 16, marginTop: 4 },
+  totalLabel: { fontSize: 15, fontWeight: '700', color: '#0F172A' },
+  totalValue: { fontSize: 18, fontWeight: '800', color: '#0F172A' },
+
+  // BUTTONS
+  outlineButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0', backgroundColor: '#fff' },
+  outlineButtonText: { fontSize: 14, fontWeight: '700', color: '#0F172A' }
 });
