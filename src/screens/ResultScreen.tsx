@@ -89,6 +89,23 @@ export default function ResultScreen({ route, navigation }: Props) {
       custoTotalExibido = result.custoTotal;
   }
 
+  // --- CÁLCULO PERSONALIZADO DE CUSTO TOTAL (QUANDO TEM CARTA DE AVALIAÇÃO) ---
+  if (result.lanceCartaVal > 0) {
+      // Fórmula: Taxa Adm Total + Fundo de Reserva + Seguro Mensal + Adesão + Crédito Líquido Na mão
+      // Crédito Líquido Na Mão (neste contexto) = Crédito Original - Lance Embutido - Lance Carta
+      
+      const lanceEmbutido = result.lanceTotal - input.lanceBolso - result.lanceCartaVal;
+      const creditoLiquidoNaMaoAjustado = result.creditoOriginal - lanceEmbutido - result.lanceCartaVal;
+      
+      const taxasSomadas = 
+        result.taxaAdminValor + 
+        result.fundoReservaValor + 
+        result.seguroMensal + 
+        result.valorAdesao;
+
+      custoTotalExibido = taxasSomadas + creditoLiquidoNaMaoAjustado;
+  }
+
   const cenarioPrincipal = activeScenario && activeScenario.length > 0 ? activeScenario[0] : null;
   const lanceEmbutidoValor = result.lanceTotal - input.lanceBolso - result.lanceCartaVal;
 
