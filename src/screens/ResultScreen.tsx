@@ -1,28 +1,29 @@
 import React, { useState } from 'react';
 import { 
   View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert, 
-  Platform, StatusBar, Modal, TextInput, KeyboardAvoidingView,
-  SafeAreaView 
+  Platform, StatusBar, Modal, TextInput, KeyboardAvoidingView 
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context'; 
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { 
   ArrowLeft, Share2, CheckCircle2, Car, CalendarClock, AlertTriangle, 
   Ban, DollarSign, Calendar, FileText, Info, RefreshCw, TrendingDown,
-  User, Phone, Briefcase, X, FileOutput, Layers
+  User, Phone, Briefcase, X, FileOutput
 } from 'lucide-react-native';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 
 import { RootStackParamList } from '../types/navigation';
 import { ContemplationScenario } from '../utils/ConsortiumCalculator';
+import { generateHTML } from '../utils/GeneratePDFHtml';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Result'>;
 
 type ScenarioMode = 'REDUZIDO' | 'CHEIO';
 
 export default function ResultScreen({ route, navigation }: Props) {
-  // Ajuste de tipagem para incluir quotaCount opcionalmente
-  const params = route.params as any; 
-  const { result, input } = params;
-  const quotaCount = params.quotaCount || 1;
+  // Pega quotaCount se vier, senão assume 1
+  const { result, input, quotaCount = 1 } = route.params;
   
   // Verifica se o Caminho 1 é viável (não é null)
   const isCaminho1Viable = result.cenarioCreditoReduzido !== null;
@@ -33,8 +34,9 @@ export default function ResultScreen({ route, navigation }: Props) {
   // Estados para o Modal de PDF
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [pdfClient, setPdfClient] = useState('');
-  const [pdfSeller, setPdfSeller] = useState('');
-  const [pdfPhone, setPdfPhone] = useState('');
+  const [pdfClientPhone, setPdfClientPhone] = useState(''); // Telefone do Cliente
+  const [pdfSeller, setPdfSeller] = useState(''); // Nome Vendedor
+  const [pdfSellerPhone, setPdfSellerPhone] = useState(''); // NOVO: Telefone Vendedor
 
   const isSpecialPlan = result.plano === 'LIGHT' || result.plano === 'SUPERLIGHT';
   const fatorPlano = result.plano === 'LIGHT' ? 0.75 : result.plano === 'SUPERLIGHT' ? 0.50 : 1.0;
@@ -45,14 +47,35 @@ export default function ResultScreen({ route, navigation }: Props) {
 
   const handleGeneratePDF = async () => {
     setShowPdfModal(false);
-    // Mock da funcionalidade de PDF para evitar erros de dependência no preview
-    Alert.alert(
-        "PDF Indisponível",
-        "A geração de PDF requer bibliotecas nativas (Expo Print/Sharing) que não estão configuradas neste ambiente de visualização."
-    );
+    try {
+      const html = generateHTML(
+        result, 
+        input, 
+        mode, 
+        {
+          cliente: pdfClient,
+          telefoneCliente: pdfClientPhone,
+          vendedor: pdfSeller,
+          telefoneVendedor: pdfSellerPhone // Passando o novo campo
+        },
+        quotaCount
+      );
+      
+      const { uri } = await Print.printToFileAsync({ html });
+      
+      if (Platform.OS === "ios" || Platform.OS === "android") {
+          await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+      } else {
+          Alert.alert("Sucesso", "PDF gerado.");
+      }
+    } catch (error) {
+      console.error(error);
+      Alert.alert("Erro", "Não foi possível gerar o PDF.");
+    }
   };
 
   const formatBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const formatPct = (v: number) => v.toFixed(2).replace('.', ',');
 
   // --- SELEÇÃO DE DADOS COM BASE NO MODO ---
   let activeScenario: ContemplationScenario[];
@@ -77,12 +100,10 @@ export default function ResultScreen({ route, navigation }: Props) {
       custoTotalExibido = result.custoTotal;
   }
 
-  // Definição antecipada para uso no cálculo e na interface
-  const lanceEmbutidoValor = result.lanceTotal - input.lanceBolso - result.lanceCartaVal;
-
-  // --- CÁLCULO PERSONALIZADO DE CUSTO TOTAL (QUANDO TEM EMBUTIDO OU CARTA) ---
-  if (result.lanceCartaVal > 0 || lanceEmbutidoValor > 0) {
-      const creditoLiquidoNaMaoAjustado = result.creditoOriginal - lanceEmbutidoValor - result.lanceCartaVal;
+  // --- CÁLCULO PERSONALIZADO DE CUSTO TOTAL (QUANDO TEM CARTA DE AVALIAÇÃO) ---
+  if (result.lanceCartaVal > 0) {
+      const lanceEmbutido = result.lanceTotal - input.lanceBolso - result.lanceCartaVal;
+      const creditoLiquidoNaMaoAjustado = result.creditoOriginal - lanceEmbutido - result.lanceCartaVal;
       
       const taxasSomadas = 
         result.taxaAdminValor + 
@@ -94,19 +115,18 @@ export default function ResultScreen({ route, navigation }: Props) {
   }
 
   const cenarioPrincipal = activeScenario && activeScenario.length > 0 ? activeScenario[0] : null;
+  const lanceEmbutidoValor = result.lanceTotal - input.lanceBolso - result.lanceCartaVal;
 
   const mesContemplacaoRef = Math.max(1, input.mesContemplacao);
   const prazoRestanteOriginal = Math.max(0, input.prazo - mesContemplacaoRef);
-  
-  const novoPrazo = cenarioPrincipal ? cenarioPrincipal.novoPrazo : 0;
-  const mesesAbatidosCalc = Math.max(0, prazoRestanteOriginal - novoPrazo);
+  const mesesAbatidosCalc = cenarioPrincipal ? Math.max(0, prazoRestanteOriginal - cenarioPrincipal.novoPrazo) : 0;
 
   const safeCenario = cenarioPrincipal as any; 
   const reducaoValor = safeCenario?.reducaoValor ?? 0;
   const reducaoPorcentagem = safeCenario?.reducaoPorcentagem ?? 0;
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
       
       {/* CABEÇALHO */}
@@ -235,14 +255,6 @@ export default function ResultScreen({ route, navigation }: Props) {
             <Text style={styles.metricValue}>
                 {formatBRL(mode === 'REDUZIDO' && isSpecialPlan ? result.creditoOriginal * fatorPlano : result.creditoOriginal)}
             </Text>
-            
-            {/* INFORMATIVO DE COTAS */}
-            {quotaCount > 1 && (
-                <View style={styles.quotaBadge}>
-                    <Layers size={12} color="#1E40AF" />
-                    <Text style={styles.quotaText}>Quantidade de Cotas: {quotaCount}</Text>
-                </View>
-            )}
           </View>
 
           <View style={styles.metricCard}>
@@ -295,52 +307,8 @@ export default function ResultScreen({ route, navigation }: Props) {
                 </View>
                 <Text style={styles.liquidDesc}>Valor disponível para compra após descontos.</Text>
             </View>
-
-            {result.lanceCartaVal > 0 && (
-                <View style={styles.powerBox}>
-                    <View style={styles.rowStart}>
-                        <Car color="#0284C7" size={16} />
-                        <Text style={styles.powerTitle}>Poder de Compra Total</Text>
-                    </View>
-                    <Text style={styles.powerValue}>{formatBRL(creditoExibido + result.lanceCartaVal)}</Text>
-                    <Text style={styles.powerDesc}>Soma do crédito líquido + valor do seu bem usado.</Text>
-                </View>
-            )}
           </View>
         )}
-
-        {/* --- DETALHAMENTO FINANCEIRO --- */}
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-             <Text style={styles.cardTitle}>Detalhamento Financeiro</Text>
-             <FileText color="#64748B" size={20} />
-          </View>
-          
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Taxa Adm Total</Text>
-            <Text style={styles.detailValue}>{formatBRL(result.taxaAdminValor)}</Text>
-          </View>
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Fundo Reserva</Text>
-            <Text style={styles.detailValue}>{formatBRL(result.fundoReservaValor)}</Text>
-          </View>
-           <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Seguro Mensal</Text>
-            <Text style={styles.detailValue}>{formatBRL(result.seguroMensal)}</Text>
-          </View>
-          <View style={styles.detailRow}>
-             <Text style={styles.detailLabel}>Taxa de Adesão</Text>
-             <Text style={styles.detailValue}>{formatBRL(result.valorAdesao)}</Text>
-          </View>
-          
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>
-                Custo Total Estimado
-                {isSpecialPlan && <Text style={{fontSize: 10, fontWeight: '400'}}> ({mode === 'REDUZIDO' ? 'Caminho 1' : 'Caminho 2'})</Text>}
-            </Text>
-            <Text style={styles.totalValue}>{formatBRL(custoTotalExibido)}</Text>
-          </View>
-        </View>
 
         {/* --- PREVISÃO PÓS-CONTEMPLAÇÃO --- */}
         {cenarioPrincipal && (
@@ -350,40 +318,6 @@ export default function ResultScreen({ route, navigation }: Props) {
                     <CalendarClock color="#64748B" size={20} />
                 </View>
                 
-                {isReajustado && (
-                    <View style={styles.reajusteAlert}>
-                        <Text style={styles.reajusteText}>
-                            Parcela reajustada para cobrir diferença do Crédito Cheio.
-                        </Text>
-                    </View>
-                )}
-
-                {/* DESTAQUE PRINCIPAL DO CENÁRIO */}
-                {result.lanceTotal > 0 && (
-                    <View style={styles.scenarioHighlight}>
-                         <View style={styles.scenarioItem}>
-                            <Text style={styles.scenarioLabel}>Nova Parcela</Text>
-                            <Text style={styles.scenarioValueMain}>{formatBRL(cenarioPrincipal.novaParcela)}</Text>
-                            
-                            {reducaoValor > 0 && (
-                                <View style={{flexDirection: 'row', alignItems: 'center', marginTop: 4, backgroundColor: 'rgba(21, 128, 61, 0.1)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4}}>
-                                   <TrendingDown size={12} color="#15803D" style={{marginRight: 4}} />
-                                   <Text style={{fontSize: 10, color: '#15803D', fontWeight: '700'}}>
-                                      -{formatBRL(reducaoValor)} ({reducaoPorcentagem.toFixed(1)}%)
-                                   </Text>
-                                </View>
-                            )}
-                         </View>
-
-                         <View style={styles.scenarioDivider} />
-                         
-                         <View style={styles.scenarioItem}>
-                            <Text style={styles.scenarioLabel}>Meses Abatidos</Text>
-                            <Text style={styles.scenarioValue}>{mesesAbatidosCalc.toFixed(1)}x</Text>
-                         </View>
-                    </View>
-                 )}
-
                 {/* TABELA LIMPA */}
                 <View style={styles.tableContainer}>
                     <View style={styles.tableHeader}>
@@ -404,21 +338,8 @@ export default function ResultScreen({ route, navigation }: Props) {
                         </View>
                     ))}
                 </View>
-                
-                <Text style={styles.tableFooter}>
-                   * Estimativa baseada na contemplação no mês {cenarioPrincipal.mes}.
-                </Text>
             </View>
         )}
-
-        {/* BOTÃO NOVA SIMULAÇÃO */}
-        <TouchableOpacity 
-          style={styles.outlineButton} 
-          onPress={() => navigation.popToTop()}
-        >
-            <RefreshCw color="#0F172A" size={20} style={{marginRight: 8}} />
-            <Text style={styles.outlineButtonText}>NOVA SIMULAÇÃO</Text>
-        </TouchableOpacity>
 
         <View style={{height: 20}} />
 
@@ -437,13 +358,14 @@ export default function ResultScreen({ route, navigation }: Props) {
           >
               <View style={styles.modalContent}>
                   <View style={styles.modalHeader}>
-                      <Text style={styles.modalTitle}>Dados para o PDF</Text>
+                      <Text style={styles.modalTitle}>Gerar Proposta PDF</Text>
                       <TouchableOpacity onPress={() => setShowPdfModal(false)} style={styles.closeBtn}>
                           <X color="#64748B" size={24} />
                       </TouchableOpacity>
                   </View>
                   
-                  <ScrollView style={{maxHeight: 400}}>
+                  <ScrollView style={{maxHeight: 500}}>
+                      {/* CLIENTE */}
                       <View style={styles.inputGroup}>
                           <View style={styles.labelRow}>
                               <User size={16} color="#64748B" />
@@ -460,29 +382,47 @@ export default function ResultScreen({ route, navigation }: Props) {
                       <View style={styles.inputGroup}>
                           <View style={styles.labelRow}>
                               <Phone size={16} color="#64748B" />
-                              <Text style={styles.inputLabel}>Telefone</Text>
+                              <Text style={styles.inputLabel}>Telefone Cliente</Text>
                           </View>
                           <TextInput 
                               style={styles.input} 
                               placeholder="(00) 00000-0000"
                               keyboardType="phone-pad"
-                              value={pdfPhone}
-                              onChangeText={setPdfPhone}
+                              value={pdfClientPhone}
+                              onChangeText={setPdfClientPhone}
+                          />
+                      </View>
+
+                      <View style={styles.divider} />
+
+                      {/* VENDEDOR */}
+                      <View style={styles.inputGroup}>
+                          <View style={styles.labelRow}>
+                              <Briefcase size={16} color="#64748B" />
+                              <Text style={styles.inputLabel}>Nome Vendedor / Representante</Text>
+                          </View>
+                          <TextInput 
+                              style={styles.input} 
+                              placeholder="Seu nome"
+                              value={pdfSeller}
+                              onChangeText={setPdfSeller}
                           />
                       </View>
 
                       <View style={styles.inputGroup}>
                           <View style={styles.labelRow}>
-                              <Briefcase size={16} color="#64748B" />
-                              <Text style={styles.inputLabel}>Vendedor / Representante</Text>
+                              <Phone size={16} color="#64748B" />
+                              <Text style={styles.inputLabel}>Telefone do Vendedor</Text>
                           </View>
                           <TextInput 
                               style={styles.input} 
-                              placeholder="Nome do vendedor"
-                              value={pdfSeller}
-                              onChangeText={setPdfSeller}
+                              placeholder="(00) 00000-0000"
+                              keyboardType="phone-pad"
+                              value={pdfSellerPhone}
+                              onChangeText={setPdfSellerPhone}
                           />
                       </View>
+
                   </ScrollView>
 
                   <TouchableOpacity style={styles.generateBtn} onPress={handleGeneratePDF}>
@@ -561,22 +501,6 @@ const styles = StyleSheet.create({
   iconBubble: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
   metricLabel: { fontSize: 12, color: '#64748B', marginBottom: 4, fontWeight: '600' },
   metricValue: { fontSize: 16, fontWeight: '800', color: '#0F172A' },
-  
-  quotaBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#DBEAFE',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    marginTop: 8,
-    gap: 4
-  },
-  quotaText: {
-    fontSize: 10,
-    color: '#1E40AF',
-    fontWeight: '700'
-  },
 
   // GENERIC CARD
   card: { backgroundColor: '#fff', borderRadius: 20, padding: 20, marginBottom: 20, shadowColor: '#64748B', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
@@ -594,7 +518,7 @@ const styles = StyleSheet.create({
   breakdownRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
   breakdownLabel: { fontSize: 13, color: '#64748B' },
   breakdownValue: { fontSize: 14, fontWeight: '600', color: '#334155' },
-  divider: { height: 1, backgroundColor: '#F1F5F9', marginVertical: 8 },
+  divider: { height: 1, backgroundColor: '#F1F5F9', marginVertical: 16 },
   
   liquidBox: { backgroundColor: '#F8FAFC', padding: 16, borderRadius: 12, marginTop: 8 },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
@@ -641,12 +565,12 @@ const styles = StyleSheet.create({
 
   // MODAL
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: '80%' },
+  modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: '90%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
   modalTitle: { fontSize: 20, fontWeight: '800', color: '#0F172A' },
   closeBtn: { padding: 4, backgroundColor: '#F1F5F9', borderRadius: 12 },
   
-  inputGroup: { marginBottom: 20 },
+  inputGroup: { marginBottom: 16 },
   labelRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 8 },
   inputLabel: { fontSize: 14, fontWeight: '700', color: '#334155' },
   input: { 

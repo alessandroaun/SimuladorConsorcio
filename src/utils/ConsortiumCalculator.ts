@@ -64,7 +64,9 @@ export class ConsortiumCalculator {
   ): ContemplationScenario[] {
 
     const cenarios: ContemplationScenario[] = [];
-    const mesInicial = Math.max(1, input.mesContemplacao);
+    // Proteção contra NaN nas entradas
+    const mesInicial = Math.max(1, input.mesContemplacao || 1);
+    const prazoTotalInput = input.prazo || 1;
     
     // Fator para converter Parcela Reduzida -> Parcela Cheia
     let fatorPlano = 1.0;
@@ -76,30 +78,27 @@ export class ConsortiumCalculator {
         const mesSimulacao = mesInicial + i;
         
         // Se ultrapassou o prazo total, para.
-        if (mesSimulacao > input.prazo) break;
+        if (mesSimulacao > prazoTotalInput) break;
 
         // 1. Definição do Prazo Restante neste mês
-        const prazoRestante = Math.max(1, input.prazo - mesSimulacao);
+        const prazoRestante = Math.max(1, prazoTotalInput - mesSimulacao);
 
         // 2. Definição da Parcela Base neste mês (Antes do Lance)
-        let parcelaBase = parcelaTabela;
+        let parcelaBase = parcelaTabela || 0;
 
         if (isCaminho2) {
-            // LÓGICA ESPECÍFICA AUTO SUPER LIGHT (Solicitada no Prompt)
-            // Fórmula: Parcela Tabela + (Gap Total / Prazo Restante)
+            // LÓGICA ESPECÍFICA AUTO SUPER LIGHT
             if (gapParaCaminho2 > 0) {
                 const acrescimoGap = gapParaCaminho2 / prazoRestante;
                 parcelaBase = parcelaTabela + acrescimoGap;
             } 
-            // LÓGICA PADRÃO PARA OUTROS PLANOS (Ex: Imóvel Super Light)
-            // Fórmula: Parcela Tabela / Fator (Já inclui taxas na recomposição)
-            else if (fatorPlano < 1.0) {
+            // LÓGICA PADRÃO
+            else if (fatorPlano > 0 && fatorPlano < 1.0) {
                 parcelaBase = parcelaTabela / fatorPlano;
             }
         }
 
         // 3. Definição do Limite de 40%
-        // A regra é estrita: 40% sobre a parcela vigente NO CAMINHO ESCOLHIDO.
         const tetoReducao = parcelaBase * 0.40;
 
         // 4. Aplicação do Lance
@@ -110,13 +109,15 @@ export class ConsortiumCalculator {
         let reducaoPct = 0;
 
         if (lanceTotal > 0) {
-            // Separação do dinheiro
-            const pctDestinoParcela = Math.min(100, Math.max(0, input.percentualLanceParaParcela));
+            // Separação do dinheiro - Proteção contra NaN vindo do input
+            const rawPct = input.percentualLanceParaParcela;
+            const safePct = (isNaN(rawPct) || rawPct === null) ? 0 : rawPct;
+            
+            const pctDestinoParcela = Math.min(100, Math.max(0, safePct));
             const valorLanceParaParcela = lanceTotal * (pctDestinoParcela / 100);
             const valorLanceParaPrazo = lanceTotal - valorLanceParaParcela; 
 
             // --- CÁLCULO REDUÇÃO PARCELA ---
-            // Fórmula: Valor destinado / Prazo Restante
             let reducaoCalculada = valorLanceParaParcela / prazoRestante;
             
             // Verifica Teto 40%
@@ -127,7 +128,7 @@ export class ConsortiumCalculator {
                 reducaoEfetiva = tetoReducao;
                 // A diferença volta para o bolo do prazo
                 const valorUsado = reducaoEfetiva * prazoRestante;
-                sobraPorTeto = valorLanceParaParcela - valorUsado;
+                sobraPorTeto = Math.max(0, valorLanceParaParcela - valorUsado);
                 info = "Limitado 40% (Sobra p/ Prazo)";
             } else {
                 info = pctDestinoParcela > 0 ? "Redução Aplicada" : "Somente Prazo";
@@ -137,11 +138,11 @@ export class ConsortiumCalculator {
             if (reducaoEfetiva >= parcelaBase) {
                  novaParcela = 0;
             } else {
-                 novaParcela = parcelaBase - reducaoEfetiva;
+                 novaParcela = Math.max(0, parcelaBase - reducaoEfetiva);
             }
 
             reducaoValor = reducaoEfetiva;
-            reducaoPct = (reducaoEfetiva / parcelaBase) * 100;
+            reducaoPct = parcelaBase > 0 ? (reducaoEfetiva / parcelaBase) * 100 : 0;
 
             // --- CÁLCULO REDUÇÃO PRAZO ---
             // Dinheiro disponível para prazo = Parte Original + Sobra do Teto 40%
@@ -154,6 +155,9 @@ export class ConsortiumCalculator {
             } else {
                 parcelasAbatidas = prazoRestante; // Quitado
             }
+            
+            // Garante que parcelasAbatidas não seja infinito ou NaN
+            if (!isFinite(parcelasAbatidas)) parcelasAbatidas = 0;
 
             novoPrazo = Math.max(0, prazoRestante - parcelasAbatidas);
             
@@ -164,13 +168,13 @@ export class ConsortiumCalculator {
         cenarios.push({
             mes: mesSimulacao,
             mesRelativo: i + 1,
-            novoPrazo: novoPrazo,
-            parcelasAbatidas: prazoRestante - novoPrazo,
-            novaParcela: novaParcela,
+            novoPrazo: novoPrazo || 0, // Fallback
+            parcelasAbatidas: Math.max(0, prazoRestante - novoPrazo),
+            novaParcela: novaParcela || 0,
             amortizacaoInfo: info || "Normal",
-            creditoEfetivo: creditoEfetivo,
-            reducaoValor: reducaoValor,
-            reducaoPorcentagem: reducaoPct
+            creditoEfetivo: creditoEfetivo || 0,
+            reducaoValor: reducaoValor || 0,
+            reducaoPorcentagem: reducaoPct || 0
         });
     }
 
@@ -178,8 +182,15 @@ export class ConsortiumCalculator {
   }
 
   static calculate(input: SimulationInput, tableMeta: TableMetadata, rawParcela: number): SimulationResult {
-    const { credito, prazo, lanceEmbutidoPct, lanceBolso, lanceCartaVal, tipoParcela, taxaAdesaoPct } = input;
-    
+    // Sanitização de entradas principais
+    const credito = input.credito || 0;
+    const prazo = input.prazo || 1;
+    const lanceEmbutidoPct = input.lanceEmbutidoPct || 0;
+    const lanceBolso = input.lanceBolso || 0;
+    const lanceCartaVal = input.lanceCartaVal || 0;
+    const taxaAdesaoPct = input.taxaAdesaoPct || 0;
+    const tipoParcela = input.tipoParcela;
+
     // --- Valores Fixos ---
     const seguroRate = tipoParcela === 'C/SV' ? tableMeta.seguroPct : 0;
     const seguroMensal = credito * seguroRate;
@@ -189,7 +200,7 @@ export class ConsortiumCalculator {
 
     const lanceEmbutidoValor = credito * lanceEmbutidoPct;
     const lanceTotal = lanceBolso + lanceEmbutidoValor + lanceCartaVal; 
-    const totalPrimeiraParcela = rawParcela + valorAdesao;
+    const totalPrimeiraParcela = (rawParcela || 0) + valorAdesao;
 
     // Fatores de Plano
     let fatorPlano = 1.0;
@@ -199,12 +210,12 @@ export class ConsortiumCalculator {
     // 1. CÁLCULO PLANO NORMAL
     if (tableMeta.plan === 'NORMAL') {
         const creditoLiquido = credito - lanceEmbutidoValor - lanceCartaVal;
-        const custoTotal = rawParcela * prazo; 
+        const custoTotal = (rawParcela || 0) * prazo; 
 
         const cenarios = ConsortiumCalculator.calculateProjection(
             input,
             tableMeta,
-            rawParcela,
+            rawParcela || 0,
             creditoLiquido,
             0, // Sem gap
             lanceTotal,
@@ -212,7 +223,7 @@ export class ConsortiumCalculator {
         );
 
         return {
-          parcelaPreContemplacao: rawParcela,
+          parcelaPreContemplacao: rawParcela || 0,
           custoTotal,
           custoTotalReduzido: custoTotal,
           custoTotalCheio: custoTotal,
@@ -235,7 +246,7 @@ export class ConsortiumCalculator {
     
     // 2. CÁLCULO PLANOS LIGHT / SUPERLIGHT (AUTO & IMOVEL)
     else {
-        const mesRef = Math.max(1, input.mesContemplacao);
+        const mesRef = Math.max(1, input.mesContemplacao || 1);
         const prazoRestanteRef = Math.max(1, prazo - mesRef);
 
         // --- CAMINHO 1: CRÉDITO REDUZIDO ---
@@ -245,30 +256,24 @@ export class ConsortiumCalculator {
         let cenarioReduzido: ContemplationScenario[] | null = null;
         let custoTotalReduzido = 0;
 
-        // REGRA DE BLOQUEIO (Tópico 2): Se Lance > Crédito Disponível no C1, bloqueia VISUALIZAÇÃO DO C1.
-        // Mas o cálculo do C2 continua possível.
         const isCaminho1Viavel = (creditoLiquidoReduzido > 0) && (lanceTotal < creditoBaseReduzido);
 
         if (isCaminho1Viavel) {
              cenarioReduzido = ConsortiumCalculator.calculateProjection(
                 input,
                 tableMeta,
-                rawParcela, // Parcela Reduzida
+                rawParcela || 0, // Parcela Reduzida
                 creditoLiquidoReduzido,
                 0, // Sem Gap
                 lanceTotal,
                 false
             );
-            // Custo C1: O que pagou até contemplar + O que falta (Parcela Reduzida * Prazo Restante)
-            custoTotalReduzido = (rawParcela * mesRef) + (rawParcela * prazoRestanteRef); 
+            // Custo C1
+            custoTotalReduzido = ((rawParcela || 0) * mesRef) + ((rawParcela || 0) * prazoRestanteRef); 
         }
 
         // --- CAMINHO 2: CRÉDITO CHEIO ---
         const creditoLiquidoCheio = credito - lanceEmbutidoValor - lanceCartaVal;
-        
-        // CONFIGURAÇÃO ESPECÍFICA PARA AUTO SUPER LIGHT
-        // Se for Auto Super Light, usamos a lógica do Gap (Parcela Reduzida + Gap / Prazo)
-        // Se for outros (Imóvel SL), usamos a lógica da divisão (Parcela Reduzida / Fator)
         
         let gapParaCaminho2 = 0;
         let parcelaReajustadaDisplay = 0;
@@ -276,35 +281,33 @@ export class ConsortiumCalculator {
         const isAutoSuperLight = tableMeta.category === 'AUTO' && tableMeta.plan === 'SUPERLIGHT';
 
         if (isAutoSuperLight) {
-             // Lógica do Gap (Aditiva)
              gapParaCaminho2 = credito * (1 - fatorPlano);
              const acrescimoDisplay = gapParaCaminho2 / prazoRestanteRef;
-             parcelaReajustadaDisplay = rawParcela + acrescimoDisplay;
+             parcelaReajustadaDisplay = (rawParcela || 0) + acrescimoDisplay;
         } else {
-             // Lógica Padrão/Imóvel (Multiplicativa/Divisão)
-             parcelaReajustadaDisplay = rawParcela / fatorPlano;
+             if (fatorPlano > 0) {
+                parcelaReajustadaDisplay = (rawParcela || 0) / fatorPlano;
+             }
         }
 
         const cenarioCheio = ConsortiumCalculator.calculateProjection(
             input,
             tableMeta,
-            rawParcela, // Passamos a reduzida
+            rawParcela || 0, // Passamos a reduzida
             creditoLiquidoCheio,
-            gapParaCaminho2, // Passamos o Gap (será > 0 apenas para Auto SL)
+            gapParaCaminho2, 
             lanceTotal,
-            true // Flag Caminho 2 (Ativa Parcela Cheia)
+            true // Flag Caminho 2
         );
 
-        // Custo C2: O que pagou até agora (Reduzido) + O que falta (Cheia/Reajustada * Prazo Restante)
-        const custoTotalCheio = (rawParcela * mesRef) + (parcelaReajustadaDisplay * prazoRestanteRef);
+        const custoTotalCheio = ((rawParcela || 0) * mesRef) + (parcelaReajustadaDisplay * prazoRestanteRef);
 
-        // Escolha do default (Se C1 estiver bloqueado, mostra C2)
         const cenarioDefault = cenarioReduzido ? cenarioReduzido : cenarioCheio;
         const creditoLiquidoDefault = cenarioReduzido ? creditoLiquidoReduzido : creditoLiquidoCheio;
         const custoTotalDefault = cenarioReduzido ? custoTotalReduzido : custoTotalCheio;
 
         return {
-            parcelaPreContemplacao: rawParcela,
+            parcelaPreContemplacao: rawParcela || 0,
             custoTotal: custoTotalDefault,
             custoTotalReduzido,
             custoTotalCheio,
@@ -327,16 +330,17 @@ export class ConsortiumCalculator {
   }
 
   static validate(input: SimulationInput, tableMeta: TableMetadata): string | null {
-    if (input.lanceEmbutidoPct > tableMeta.maxLanceEmbutido) {
+    const lanceEmbutidoPct = input.lanceEmbutidoPct || 0;
+    
+    if (lanceEmbutidoPct > tableMeta.maxLanceEmbutido) {
       return `Máximo de lance embutido: ${(tableMeta.maxLanceEmbutido * 100).toFixed(0)}%`;
     }
-    if (input.credito <= 0) return "Valor de crédito inválido.";
+    if (!input.credito || input.credito <= 0) return "Valor de crédito inválido.";
     
-    const lanceEmbVal = input.credito * input.lanceEmbutidoPct;
-    const totalLances = input.lanceBolso + lanceEmbVal + input.lanceCartaVal;
+    const lanceEmbVal = input.credito * lanceEmbutidoPct;
+    const totalLances = (input.lanceBolso || 0) + lanceEmbVal + (input.lanceCartaVal || 0);
     
-    // Validação de Crédito Negativo (Ainda necessária para evitar absurdos)
-    const creditoTotalLiquido = input.credito - lanceEmbVal - input.lanceCartaVal;
+    const creditoTotalLiquido = input.credito - lanceEmbVal - (input.lanceCartaVal || 0);
     if (creditoTotalLiquido < 0) {
        return `Atenção: A soma dos lances supera o valor total do crédito. Simulação inviável.`;
     }

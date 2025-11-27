@@ -61,6 +61,7 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
   const [lanceBolso, setLanceBolso] = useState('');       
   const [lanceCartaInput, setLanceCartaInput] = useState(''); 
   
+  // Inicializando com valores seguros
   const [pctParaParcelaInput, setPctParaParcelaInput] = useState('0'); 
   const [pctParaPrazoInput, setPctParaPrazoInput] = useState('100'); 
   
@@ -70,34 +71,21 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
   // --- HELPERS E CÁLCULOS ---
   const availableCredits = useMemo(() => rawData.map(r => r.credito).sort((a,b) => a-b), [rawData]);
   
-  // Seleção da Linha Principal (Baseado no primeiro crédito para definir prazos)
+  // Seleção da Linha Principal
   const mainRow = useMemo(() => {
     const val = parseFloat(credits[0]);
     return rawData.find(r => r.credito === val) || null;
   }, [credits, rawData]);
 
-  // --- LÓGICA DE INTERSECÇÃO DE PRAZOS (ADAPTAÇÃO AUTOMÁTICA) ---
+  // --- LÓGICA DE INTERSECÇÃO DE PRAZOS ---
   const availablePrazos = useMemo(() => {
-    // 1. Identificar créditos válidos selecionados
-    const validValues = credits
-        .map(c => parseFloat(c))
-        .filter(v => v > 0);
-    
-    // Se não houver crédito selecionado, retorna vazio
+    const validValues = credits.map(c => parseFloat(c)).filter(v => v > 0);
     if (validValues.length === 0) return [];
 
-    // 2. Buscar as linhas (Rows) completas na tabela para cada crédito
-    const rows = validValues
-        .map(v => rawData.find(r => r.credito === v))
-        .filter(r => !!r);
-    
-    // Se algum crédito não foi encontrado na tabela (improvável), retorna vazio
+    const rows = validValues.map(v => rawData.find(r => r.credito === v)).filter(r => !!r);
     if (rows.length === 0) return [];
 
-    // 3. Intersecção: Começa com os prazos do PRIMEIRO crédito
     const basePrazos = rows[0]!.prazos;
-
-    // Filtra para manter APENAS os prazos que existem em TODAS as linhas selecionadas
     const commonPrazos = basePrazos.filter((pBase: any) => {
         const prazoNum = pBase.prazo;
         return rows.every(r => r!.prazos.some((p: any) => p.prazo === prazoNum));
@@ -114,27 +102,21 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
     return false;
   }, [availablePrazos]);
 
-  // --- VALOR TOTAL DO CRÉDITO SOMADO ---
   const totalCreditoSimulacao = useMemo(() => {
       return credits.reduce((acc, curr) => acc + (parseFloat(curr) || 0), 0);
   }, [credits]);
 
-  // --- CÁLCULO DA PARCELA SOMADA ---
   const currentParcelaValue = useMemo(() => {
      if (!mainRow || prazoIdx === null) return 0;
-     
-     // Recupera o objeto do prazo com segurança
      const targetPrazoData = availablePrazos[prazoIdx];
      if (!targetPrazoData) return 0;
 
      const targetPrazo = targetPrazoData.prazo;
      let totalParcela = 0;
 
-     // Itera sobre todos os créditos selecionados e soma as parcelas correspondentes ao prazo alvo
      credits.forEach((creditValStr) => {
          const val = parseFloat(creditValStr);
          if (!val) return;
-
          const row = rawData.find(r => r.credito === val);
          if (row) {
              const pData = row.prazos.find((p: any) => p.prazo === targetPrazo);
@@ -144,7 +126,6 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
              }
          }
      });
-
      return totalParcela;
   }, [credits, rawData, prazoIdx, tipoParcela, availablePrazos, mainRow]);
 
@@ -152,19 +133,17 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
     if (isSeguroObrigatorio) setTipoParcela('C/SV');
   }, [isSeguroObrigatorio]);
 
-  // Resetar o índice do prazo se o crédito principal mudar (para evitar índices inválidos)
   useEffect(() => {
-    if (!mainRow) {
-        setPrazoIdx(null); 
-    }
+    if (!mainRow) setPrazoIdx(null); 
   }, [credits[0]]);
 
-  // PROTEÇÃO EXTRA: Se a lista de prazos diminuir (intersecção) e o índice selecionado não existir mais, reseta.
   useEffect(() => {
     if (prazoIdx !== null && prazoIdx >= availablePrazos.length) {
         setPrazoIdx(null);
     }
   }, [availablePrazos, prazoIdx]);
+
+  // *** REMOVIDO O USEEFFECT QUE CAUSAVA O LOOP INFINITO AQUI ***
 
   const handleCurrencyChange = (text: string, setter: (val: string) => void) => {
       setter(formatCurrencyInput(text));
@@ -176,7 +155,7 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
     const numericValue = parseCurrencyToFloat(text);
     if (numericValue > maxLancePermitido) {
       setLanceEmbInput(formatCurrencyInput(maxLancePermitido.toFixed(2).replace('.', '')));
-      Alert.alert("Limite Atingido", `O lance embutido máximo é de ${(table.maxLanceEmbutido * 100).toFixed(0)}% do total (${formatCurrency(maxLancePermitido)}).`);
+      Alert.alert("Limite Atingido", `O lance embutido máximo é de ${(table.maxLanceEmbutido * 100).toFixed(0)}% do total.`);
     } else {
       setLanceEmbInput(formatCurrencyInput(text));
     }
@@ -195,38 +174,48 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
     }
   };
 
-  useEffect(() => {
-    const pctParcela = parseFloat(pctParaParcelaInput) || 0;
-    const pctPrazo = parseFloat(pctParaPrazoInput) || 0;
-
-    if (pctParcela + pctPrazo !== 100) {
-        if (pctParaParcelaInput !== '' && pctParaParcelaInput !== '100' && pctParaParcelaInput !== '0') {
-            const newPrazo = Math.min(100, Math.max(0, 100 - pctParcela));
-            setPctParaParcelaInput(newPrazo.toString());
-        } 
-        else if (pctParaPrazoInput !== '' && pctParaPrazoInput !== '100' && pctParaPrazoInput !== '0') {
-            const newParcela = Math.min(100, Math.max(0, 100 - pctPrazo));
-            setPctParaParcelaInput(newParcela.toString());
-        }
-    }
-  }, [pctParaParcelaInput, pctParaPrazoInput]);
-
+  // --- CORREÇÃO: Lógica unificada no evento de mudança (Sem useEffect) ---
   const handlePercentualChange = (text: string, type: 'parcela' | 'prazo') => {
-    const numericValue = parseFloat(text.replace(/[^0-9.]/g, '')) || 0;
-    if (numericValue > 100) {
-      const limitedValue = '100';
-      if (type === 'parcela') { setPctParaParcelaInput(limitedValue); setPctParaPrazoInput('0'); }
-      else { setPctParaPrazoInput(limitedValue); setPctParaParcelaInput('0'); }
-      return;
+    // 1. Limpeza do input
+    let cleanText = text.replace(/[^0-9.]/g, '');
+    
+    // Evita múltiplos pontos decimais
+    if ((cleanText.match(/\./g) || []).length > 1) return;
+
+    // Se estiver vazio, define o outro como 100%
+    if (cleanText === '') {
+        if (type === 'parcela') {
+            setPctParaParcelaInput('');
+            setPctParaPrazoInput('100');
+        } else {
+            setPctParaPrazoInput('');
+            setPctParaParcelaInput('100');
+        }
+        return;
     }
+
+    // Verifica limite de 100%
+    const val = parseFloat(cleanText);
+    if (val > 100) {
+        cleanText = '100'; 
+    }
+
+    // Calcula o complemento (100 - valor)
+    const numVal = parseFloat(cleanText) || 0;
+    const complementVal = Math.max(0, 100 - numVal);
+    
+    // Formata o complemento para string (sem casas decimais desnecessárias)
+    const complementStr = Number.isInteger(complementVal) 
+        ? complementVal.toString() 
+        : complementVal.toFixed(2).replace(/\.?0+$/, '');
+
+    // 2. Atualiza AMBOS os estados simultaneamente
     if (type === 'parcela') {
-      setPctParaParcelaInput(text);
-      if (text === '') setPctParaPrazoInput('100');
-      else setPctParaParcelaInput(Math.min(100, Math.max(0, 100 - numericValue)).toString());
-    } else { 
-      setPctParaPrazoInput(text);
-      if (text === '') setPctParaParcelaInput('0');
-      else setPctParaParcelaInput(Math.min(100, Math.max(0, 100 - numericValue)).toString());
+        setPctParaParcelaInput(cleanText);
+        setPctParaPrazoInput(complementStr);
+    } else {
+        setPctParaPrazoInput(cleanText);
+        setPctParaParcelaInput(complementStr);
     }
   };
 
@@ -246,15 +235,9 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
     return dataFutura.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
   }, [mesContemplacaoInput]);
 
-  // --- VALIDAÇÃO DE LIMITE (REGRA 40%) ---
   const limitInfo = useMemo(() => {
     if (!currentParcelaValue || prazoIdx === null || totalLances === 0) {
-        return { 
-          isValid: true, 
-          message: '', 
-          maxPermittedPct: 100,
-          isExceeding40PercentRule: false 
-        };
+        return { isValid: true, message: '', maxPermittedPct: 100, isExceeding40PercentRule: false };
     }
     const prazoTotal = availablePrazos[prazoIdx]?.prazo;
     if (!prazoTotal) return { isValid: false, message: '', maxPermittedPct: 0, isExceeding40PercentRule: false };
@@ -291,12 +274,12 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
         return;
     }
     const maxPct = limitInfo.maxPermittedPct;
+    // Aqui usamos set direto, pois não é evento de digitação
     setPctParaParcelaInput(maxPct.toString());
     setPctParaPrazoInput((100 - maxPct).toString());
   };
 
   // --- GESTÃO DE MÚLTIPLOS CRÉDITOS ---
-
   const handleOpenCreditModal = (index: number) => {
       setEditingIndex(index);
       setShowCreditModal(true);
@@ -341,7 +324,7 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
 
     const prazoTotal = availablePrazos[prazoIdx]?.prazo;
     if (!prazoTotal) {
-         Alert.alert("Erro", "Prazo selecionado inválido ou indisponível para o conjunto de créditos.");
+         Alert.alert("Erro", "Prazo selecionado inválido ou indisponível.");
          return;
     }
 
@@ -357,7 +340,7 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
 
     const input: SimulationInput = {
       tableId: table.id,
-      credito: totalCreditoSimulacao, // Soma total
+      credito: totalCreditoSimulacao,
       prazo: prazoTotal,
       tipoParcela,
       lanceBolso: valLanceBolso,
@@ -375,11 +358,8 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
     }
 
     const result = ConsortiumCalculator.calculate(input, table, currentParcelaValue);
-    
-    // Calcula quantos créditos válidos existem (diferentes de zero)
     const quotaCount = credits.filter(c => parseFloat(c) > 0).length;
 
-    // Passa 'quotaCount' para a tela de resultados
     navigation.navigate('Result', { result, input, quotaCount });
   };
 
@@ -391,7 +371,7 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
     <View style={styles.mainContainer}>
       <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
       
-      {/* HEADER LIMPO */}
+      {/* HEADER */}
       <View style={styles.header}>
         <TouchableOpacity 
           onPress={() => navigation.goBack()} 
@@ -422,7 +402,6 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
           {credits.map((creditVal, index) => {
               const isFirst = index === 0;
               const hasValue = !!creditVal;
-              
               const titleText = credits.length > 1 ? `VALOR DO CRÉDITO ${index + 1}` : `VALOR DO CRÉDITO`;
 
               return (
@@ -436,40 +415,24 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
                         activeOpacity={0.8}
                       >
                         <View style={styles.heroRow}>
-                            <Text style={[
-                                styles.heroLabel, 
-                                !isFirst && {color: '#2563EB'}
-                            ]}>
+                            <Text style={[styles.heroLabel, !isFirst && {color: '#2563EB'}]}>
                                 {titleText}
                             </Text>
-                            <View style={[
-                                styles.heroEditIcon,
-                                !isFirst && {backgroundColor: '#DBEAFE'}
-                            ]}>
+                            <View style={[styles.heroEditIcon, !isFirst && {backgroundColor: '#DBEAFE'}]}>
                                 <ChevronDown size={16} color={isFirst ? "#3B82F6" : "#2563EB"} />
                             </View>
                         </View>
                         
                         {hasValue ? (
-                            <Text style={[
-                                styles.heroValue, 
-                                !isFirst && {color: '#1E40AF'}
-                            ]}>
+                            <Text style={[styles.heroValue, !isFirst && {color: '#1E40AF'}]}>
                                 {formatCurrency(parseFloat(creditVal))}
                             </Text>
                         ) : (
-                            <Text style={[
-                                styles.heroValue, 
-                                {color: isFirst ? '#CBD5E1' : '#93C5FD'}
-                            ]}>
+                            <Text style={[styles.heroValue, {color: isFirst ? '#CBD5E1' : '#93C5FD'}]}>
                                 R$ 0,00
                             </Text>
                         )}
-                        
-                        <View style={[
-                            styles.heroFooterLine, 
-                            !isFirst && {backgroundColor: '#2563EB'}
-                        ]} />
+                        <View style={[styles.heroFooterLine, !isFirst && {backgroundColor: '#2563EB'}]} />
                       </TouchableOpacity>
 
                       {!isFirst && (
@@ -485,18 +448,13 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
               );
           })}
 
-          {/* BOTÃO ADICIONAR NOVO CRÉDITO */}
           {credits.length < MAX_CREDITS && credits[0] !== '' && (
-            <TouchableOpacity 
-                style={styles.addCreditBtn} 
-                onPress={handleAddCredit}
-            >
+            <TouchableOpacity style={styles.addCreditBtn} onPress={handleAddCredit}>
                 <PlusCircle size={18} color="#fff" />
                 <Text style={styles.addCreditText}>Clique para adicionar mais um crédito a simulação</Text>
             </TouchableOpacity>
           )}
 
-          {/* TOTALIZADOR VISUAL SE HOUVER MAIS DE 1 CRÉDITO */}
           {credits.length > 1 && totalCreditoSimulacao > 0 && (
               <View style={styles.totalSumContainer}>
                   <Text style={styles.totalSumLabel}>TOTAL SIMULADO</Text>
@@ -531,9 +489,8 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
             </ScrollView>
           </View>
 
-          {/* OPÇÕES ADICIONAIS (ADESAO E SEGURO) */}
+          {/* OPÇÕES ADICIONAIS */}
           <View style={styles.optionsRow}>
-              {/* ADESÃO */}
               <View style={[styles.optionCol, { flex: 1.2 }]}>
                  <Text style={styles.miniLabel}>Taxa de Adesão</Text>
                  <View style={styles.gridContainer}>
@@ -551,7 +508,6 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
                  </View>
               </View>
 
-              {/* SEGURO */}
               <View style={[styles.optionCol, { flex: 0.8 }]}>
                  <Text style={styles.miniLabel}>Seguro Prestamista</Text>
                  <View style={{flex:1, justifyContent: 'center'}}>
@@ -608,13 +564,8 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
                     <Text style={styles.lanceSummarySubtitle}>Antecipe sua contemplação</Text>
                 )}
             </View>
-            
             <View style={styles.lanceSummaryAction}>
-                {totalLances > 0 ? (
-                    <Settings2 size={20} color="#64748B" />
-                ) : (
-                    <ChevronRight size={20} color="#CBD5E1" />
-                )}
+                {totalLances > 0 ? <Settings2 size={20} color="#64748B" /> : <ChevronRight size={20} color="#CBD5E1" />}
             </View>
           </TouchableOpacity>
 
@@ -655,12 +606,10 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
                  )}
              </View>
           </View>
-
           <View style={{height: 120}} />
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* FOOTER ACTION */}
       <View style={styles.footerContainer}>
         <TouchableOpacity 
             style={[styles.mainBtn, {opacity: getButtonOpacity()}]} 
@@ -673,25 +622,21 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
       </View>
 
 
-      {/* --- MODAL CRÉDITO --- */}
+      {/* MODAL CRÉDITO */}
       <Modal visible={showCreditModal} animationType="fade" transparent onRequestClose={() => setShowCreditModal(false)}>
         <View style={styles.modalOverlay}>
             <View style={styles.modalSheet}>
                 <View style={styles.modalHandle} />
                 <View style={styles.modalHeader}>
-                    <Text style={styles.modalTitle}>
-                        Selecione o Crédito {editingIndex + 1}
-                    </Text>
+                    <Text style={styles.modalTitle}>Selecione o Crédito {editingIndex + 1}</Text>
                     <TouchableOpacity onPress={() => setShowCreditModal(false)} style={styles.closeBtn}>
                         <X color="#64748B" size={24} />
                     </TouchableOpacity>
                 </View>
-                
                 <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}>
                     {availableCredits.map((credit, index) => {
                         const currentVal = parseFloat(credits[editingIndex]);
                         const isSelected = currentVal === credit;
-                        
                         return (
                         <TouchableOpacity key={index} style={[styles.creditOption, isSelected && styles.creditOptionActive]} onPress={() => handleSelectCredit(credit)}>
                             <Text style={[styles.creditOptionText, isSelected && styles.creditOptionTextActive]}>
@@ -706,7 +651,7 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
         </View>
       </Modal>
 
-      {/* --- MODAL LANCES --- */}
+      {/* MODAL LANCES */}
       <Modal visible={showLanceModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowLanceModal(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{flex: 1}}>
             <SafeAreaView style={styles.modalFullContainer}>
@@ -717,10 +662,7 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
                     </TouchableOpacity>
                 </View>
                 
-                <ScrollView 
-                    showsVerticalScrollIndicator={false} 
-                    contentContainerStyle={{padding: 24, paddingBottom: 40}} 
-                >
+                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{padding: 24, paddingBottom: 40}}>
                     {/* INPUTS DE VALOR */}
                     <Text style={styles.modalSectionTitle}>Fontes do Lance</Text>
                     
@@ -781,7 +723,6 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
                         <Text style={styles.modalSectionTitle}>Como usar o lance?</Text>
                         
                         <View style={styles.allocationBox}>
-                            {/* VISUAL BAR */}
                             <View style={styles.allocationBar}>
                                 <View style={[styles.barSegment, {flex: percentualLanceParaPrazo, backgroundColor: '#3B82F6'}]} />
                                 <View style={[styles.barSegment, {flex: percentualLanceParaParcela, backgroundColor: '#8B5CF6'}]} />
@@ -865,144 +806,34 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-  mainContainer: { 
-    flex: 1, 
-    backgroundColor: '#F8FAFC' 
-  },
-  
-  // HEADER
-  header: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'space-between', 
-    paddingHorizontal: 24, 
-    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 16 : 60, 
-    paddingBottom: 24, 
-    backgroundColor: '#F8FAFC',
-    zIndex: 10
-  },
+  mainContainer: { flex: 1, backgroundColor: '#F8FAFC' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 16 : 60, paddingBottom: 24, backgroundColor: '#F8FAFC', zIndex: 10 },
   backBtn: { padding: 8, backgroundColor: '#F1F5F9', borderRadius: 12 },
   headerTitle: { fontSize: 14, fontWeight: '600', color: '#64748B', textTransform: 'uppercase', letterSpacing: 0.5 },
   headerSubtitle: { fontSize: 18, fontWeight: '800', color: '#0F172A' },
-
   scrollContent: { paddingHorizontal: 24, paddingBottom: 100 },
-
-  // TEXTOS E SEPARADORES
-  sectionHeader: { fontSize: 18, fontWeight: '800', color: '#0F172A', marginBottom: 16 },
-  divider: { height: 1, backgroundColor: '#E2E8F0', marginVertical: 24 },
-
-  // HERO CREDIT CARD
-  heroCreditCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    padding: 24,
-    // marginBottom: 24, // Removido para controle individual
-    shadowColor: '#64748B',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    elevation: 4,
-    borderWidth: 1,
-    borderColor: '#F1F5F9'
-  },
+  heroCreditCard: { backgroundColor: '#FFFFFF', borderRadius: 24, padding: 24, shadowColor: '#64748B', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.08, shadowRadius: 16, elevation: 4, borderWidth: 1, borderColor: '#F1F5F9' },
   heroRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   heroLabel: { fontSize: 12, fontWeight: '700', color: '#64748B', letterSpacing: 1 },
   heroEditIcon: { backgroundColor: '#EFF6FF', padding: 6, borderRadius: 8 },
   heroValue: { fontSize: 36, fontWeight: '800', color: '#0F172A', letterSpacing: -1 },
   heroFooterLine: { height: 4, width: 40, backgroundColor: '#3B82F6', borderRadius: 2, marginTop: 16 },
-
-  // ADD CREDIT BUTTON
-  addCreditBtn: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: '#2563EB',
-      paddingVertical: 12,
-      paddingHorizontal: 16,
-      borderRadius: 16,
-      marginTop: -10, 
-      marginBottom: 24,
-      shadowColor: '#2563EB',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.2,
-      shadowRadius: 8,
-      elevation: 4
-  },
-  addCreditText: {
-      color: '#fff',
-      fontSize: 13,
-      fontWeight: '600',
-      marginLeft: 8
-  },
-  
-  // REMOVE CREDIT BUTTON
-  removeBtn: {
-      position: 'absolute',
-      top: -12 - 12, 
-      right: 12,
-      backgroundColor: '#FEF2F2',
-      padding: 8,
-      borderRadius: 12,
-      zIndex: 10
-  },
-
-  // TOTAL SUM
-  totalSumContainer: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      backgroundColor: '#F8FAFC',
-      borderWidth: 1,
-      borderColor: '#E2E8F0',
-      padding: 16,
-      borderRadius: 16,
-      marginBottom: 24
-  },
+  addCreditBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#2563EB', paddingVertical: 12, paddingHorizontal: 16, borderRadius: 16, marginTop: -10, marginBottom: 24, shadowColor: '#2563EB', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 },
+  addCreditText: { color: '#fff', fontSize: 13, fontWeight: '600', marginLeft: 8 },
+  removeBtn: { position: 'absolute', top: -24, right: 12, backgroundColor: '#FEF2F2', padding: 8, borderRadius: 12, zIndex: 10 },
+  totalSumContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', padding: 16, borderRadius: 16, marginBottom: 24 },
   totalSumLabel: { fontSize: 12, fontWeight: '700', color: '#64748B', letterSpacing: 1 },
   totalSumValue: { fontSize: 18, fontWeight: '800', color: '#1E293B' },
-
-
-  // INPUT GROUPS (Prazos)
   inputGroup: { marginBottom: 16 },
   labelRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 },
   groupLabel: { fontSize: 16, fontWeight: '700', color: '#334155' },
   pillScroll: { gap: 10, paddingRight: 20 },
-  modernPill: { 
-    paddingHorizontal: 20, 
-    paddingVertical: 12, 
-    borderRadius: 14, 
-    backgroundColor: '#F1F5F9', 
-    borderWidth: 1, 
-    borderColor: '#E2E8F0' 
-  },
-  modernPillActive: { 
-    backgroundColor: '#0F172A', 
-    borderColor: '#0F172A',
-    shadowColor: '#0F172A',
-    shadowOpacity: 0.2,
-    shadowOffset: {width: 0, height: 4},
-    shadowRadius: 8
-  },
+  modernPill: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 14, backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#E2E8F0' },
+  modernPillActive: { backgroundColor: '#0F172A', borderColor: '#0F172A', shadowColor: '#0F172A', shadowOpacity: 0.2, shadowOffset: {width: 0, height: 4}, shadowRadius: 8 },
   modernPillText: { fontSize: 15, fontWeight: '600', color: '#64748B' },
   modernPillTextActive: { color: '#FFFFFF' },
   helperText: { fontSize: 13, color: '#94A3B8', fontStyle: 'italic' },
-
-  // LANCE SUMMARY CARD
-  lanceSummaryCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 24,
-    marginTop: 8, // Mais próximo do item acima
-    borderWidth: 1,
-    borderColor: '#F1F5F9',
-    shadowColor: '#64748B',
-    shadowOpacity: 0.05,
-    shadowOffset: {width: 0, height: 4},
-    elevation: 2
-  },
+  lanceSummaryCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 20, padding: 16, marginBottom: 24, marginTop: 8, borderWidth: 1, borderColor: '#F1F5F9', shadowColor: '#64748B', shadowOpacity: 0.05, shadowOffset: {width: 0, height: 4}, elevation: 2 },
   disabledCard: { opacity: 0.6, backgroundColor: '#F8FAFC' },
   lanceSummaryLeft: { marginRight: 16 },
   iconCircle: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
@@ -1011,18 +842,7 @@ const styles = StyleSheet.create({
   lanceSummaryValue: { fontSize: 18, fontWeight: '800', color: '#10B981', marginVertical: 2 },
   lanceSummarySubtitle: { fontSize: 12, color: '#64748B' },
   lanceSummaryAction: { paddingLeft: 8 },
-
-  // TIMELINE CARD
-  timelineCard: {
-    backgroundColor: '#0F172A',
-    borderRadius: 24,
-    padding: 24,
-    marginBottom: 24,
-    shadowColor: '#0F172A',
-    shadowOpacity: 0.25,
-    shadowOffset: {width: 0, height: 8},
-    elevation: 8
-  },
+  timelineCard: { backgroundColor: '#0F172A', borderRadius: 24, padding: 24, marginBottom: 24, shadowColor: '#0F172A', shadowOpacity: 0.25, shadowOffset: {width: 0, height: 8}, elevation: 8 },
   timelineHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20 },
   timelineTitle: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
   timelineBody: { flexDirection: 'row', gap: 24 },
@@ -1033,61 +853,25 @@ const styles = StyleSheet.create({
   timelineResult: { flex: 1, justifyContent: 'center' },
   timelineResultLabel: { color: '#64748B', fontSize: 10, fontWeight: '700', letterSpacing: 1, marginBottom: 4 },
   timelineResultValue: { color: '#3B82F6', fontSize: 16, fontWeight: '700' },
-
-  // OPÇÕES ROW (NOVO LAYOUT)
   optionsRow: { flexDirection: 'row', gap: 16, marginBottom: 16, alignItems: 'stretch' },
   optionCol: { }, 
   miniLabel: { fontSize: 12, fontWeight: '600', color: '#64748B', marginBottom: 8, textTransform: 'uppercase' },
-  
-  // GRID ADESÃO 2x2
   gridContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   gridPill: { width: '47%', paddingVertical: 10, borderRadius: 10, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center' },
   gridPillActive: { backgroundColor: '#334155' },
   gridPillText: { fontSize: 13, color: '#64748B', fontWeight: '600' },
   tinyPillTextActive: { color: '#fff' },
-  
-  // SWITCH CUSTOM (REFORMULADO)
-  newSwitchContainer: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    backgroundColor: '#E2E8F0', 
-    borderRadius: 24, 
-    height: 48, 
-    paddingHorizontal: 4, 
-    position: 'relative',
-    width: '100%' 
-  },
+  newSwitchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#E2E8F0', borderRadius: 24, height: 48, paddingHorizontal: 4, position: 'relative', width: '100%' },
   newSwitchActive: { backgroundColor: '#0EA5E9' },
   newSwitchInactive: { backgroundColor: '#E2E8F0' },
   newSwitchKnobLayout: { flex: 1, justifyContent: 'center' },
-  newSwitchKnob: { 
-    width: 40, 
-    height: 40, 
-    borderRadius: 20, 
-    backgroundColor: '#FFFFFF', 
-    shadowColor: '#000', 
-    shadowOpacity: 0.1, 
-    shadowRadius: 2, 
-    elevation: 2 
-  },
-  newSwitchText: { 
-    position: 'absolute', 
-    fontSize: 14, 
-    fontWeight: '700',
-    width: '100%',
-    textAlign: 'center',
-    zIndex: -1
-  },
-  
+  newSwitchKnob: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#FFFFFF', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 2, elevation: 2 },
+  newSwitchText: { position: 'absolute', fontSize: 14, fontWeight: '700', width: '100%', textAlign: 'center', zIndex: -1 },
   lockBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#F0F9FF', paddingHorizontal: 12, paddingVertical: 12, borderRadius: 12, alignSelf: 'flex-start' },
   lockText: { fontSize: 12, color: '#0369A1', fontWeight: '700' },
-
-  // FOOTER
   footerContainer: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#FFFFFF', padding: 20, borderTopWidth: 1, borderTopColor: '#F1F5F9' },
   mainBtn: { backgroundColor: '#0F172A', borderRadius: 18, paddingVertical: 18, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', shadowColor: '#0F172A', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.2, shadowRadius: 12, elevation: 6 },
   mainBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 16, letterSpacing: 0.5 },
-
-  // MODAL CREDIT
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   modalSheet: { backgroundColor: '#fff', borderTopLeftRadius: 32, borderTopRightRadius: 32, paddingBottom: 40, maxHeight: '80%' },
   modalHandle: { width: 40, height: 4, backgroundColor: '#E2E8F0', borderRadius: 2, alignSelf: 'center', marginTop: 12 },
@@ -1100,24 +884,17 @@ const styles = StyleSheet.create({
   creditOptionTextActive: { color: '#2563EB', fontWeight: '700' },
   checkCircle: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: '#2563EB', alignItems: 'center', justifyContent: 'center' },
   checkDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#2563EB' },
-
-  // MODAL LANCES (Inputs Fixes)
   modalFullContainer: { flex: 1, backgroundColor: '#F8FAFC' },
   modalSectionTitle: { fontSize: 14, fontWeight: '700', color: '#64748B', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12, marginTop: 8 },
-  
   inputCard: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#E2E8F0' },
   inputCardHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
   inputCardLabel: { fontSize: 14, fontWeight: '700', color: '#1E293B' },
   modalInput: { fontSize: 18, fontWeight: '600', color: '#0F172A', borderBottomWidth: 1, borderBottomColor: '#E2E8F0', paddingBottom: 8, width: '100%' },
-  
   quickTags: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
   quickLabel: { fontSize: 12, color: '#94A3B8' },
   tag: { backgroundColor: '#F1F5F9', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 },
   tagText: { fontSize: 12, fontWeight: '700', color: '#475569' },
-  
   rowInputs: { flexDirection: 'row' },
-  
-  // ALLOCATION VISUAL
   allocationBox: { backgroundColor: '#fff', borderRadius: 20, padding: 20, borderWidth: 1, borderColor: '#E2E8F0' },
   allocationBar: { flexDirection: 'row', height: 8, borderRadius: 4, overflow: 'hidden', marginBottom: 20, backgroundColor: '#F1F5F9' },
   barSegment: { height: '100%' },
@@ -1128,19 +905,15 @@ const styles = StyleSheet.create({
   allocInput: { flex: 1, fontSize: 18, fontWeight: '700', color: '#0F172A', padding: 0 },
   allocSuffix: { fontSize: 14, color: '#94A3B8', fontWeight: '600', marginRight: 8 },
   allocationValueText: { marginTop: 6, fontSize: 13, fontWeight: '600', color: '#3B82F6' },
-  
   magicBtnInline: { backgroundColor: '#3B82F6', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
   magicBtnText: { color: '#fff', fontSize: 11, fontWeight: '700' },
-  
   warningBox: { marginTop: 16, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#FEF2F2', padding: 10, borderRadius: 8 },
   warningText: { color: '#B45309', fontSize: 11, fontWeight: '600', flex: 1 },
-
   totalBox: { marginTop: 24, backgroundColor: '#1E293B', borderRadius: 16, padding: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   totalLabel: { color: '#94A3B8', fontSize: 12, fontWeight: '700', letterSpacing: 1 },
   totalValue: { color: '#fff', fontSize: 22, fontWeight: '800', marginTop: 4 },
   totalPctLabel: { color: '#94A3B8', fontSize: 10, fontWeight: '700', letterSpacing: 1 },
   totalPctValue: { color: '#4ADE80', fontSize: 18, fontWeight: '700', marginTop: 4 },
-  
   confirmBtn: { backgroundColor: '#2563EB', margin: 24, borderRadius: 16, padding: 18, alignItems: 'center' },
   confirmBtnText: { color: '#fff', fontWeight: '800', fontSize: 16 }
 });

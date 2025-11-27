@@ -1,10 +1,20 @@
 import { SimulationResult, SimulationInput, ContemplationScenario } from './ConsortiumCalculator';
 
+// --- IMAGENS ---
+const LOGO_IMG = "https://intranet.consorciorecon.com.br/media/photo/logo_4Y8K7jg.PNG"; // Mantenha sua URL ou Base64 aqui
+const WATERMARK_IMG = "https://intranet.consorciorecon.com.br/media/photo/logo_4Y8K7jg.PNG";
+
 export const generateHTML = (
   result: SimulationResult, 
   input: SimulationInput, 
   mode: 'REDUZIDO' | 'CHEIO',
-  pdfData: { cliente: string; vendedor: string; telefone: string } = { cliente: '', vendedor: '', telefone: '' }
+  pdfData: { 
+    cliente: string; 
+    telefoneCliente: string; 
+    vendedor: string; 
+    telefoneVendedor: string; 
+  },
+  quotaCount: number = 1
 ) => {
   
   // --- FORMATADORES ---
@@ -12,10 +22,10 @@ export const generateHTML = (
   const formatPct = (val: number) => `${val.toFixed(2)}%`;
   const formatDate = () => new Date().toLocaleDateString('pt-BR');
 
-  // --- LÓGICA DE DADOS DO CENÁRIO ---
+  // --- LÓGICA DO CENÁRIO (Mantida intacta) ---
   let activeScenario: ContemplationScenario[];
   let creditoConsiderado = result.creditoLiquido;
-  let cenarioTitulo = "Normal";
+  let cenarioTitulo = "Plano Padrão";
   
   const isSpecial = result.plano === 'LIGHT' || result.plano === 'SUPERLIGHT';
 
@@ -23,11 +33,11 @@ export const generateHTML = (
       if (mode === 'REDUZIDO' && result.cenarioCreditoReduzido) {
           activeScenario = result.cenarioCreditoReduzido;
           creditoConsiderado = activeScenario[0].creditoEfetivo;
-          cenarioTitulo = "Crédito Reduzido (Caminho 1)";
+          cenarioTitulo = "Crédito Reduzido";
       } else if (result.cenarioCreditoTotal) {
           activeScenario = result.cenarioCreditoTotal;
           creditoConsiderado = activeScenario[0].creditoEfetivo;
-          cenarioTitulo = "Crédito Total - Parcela Reajustada (Caminho 2)";
+          cenarioTitulo = "Crédito Cheio (Reajustado)";
       } else {
           activeScenario = result.cenariosContemplacao;
       }
@@ -35,267 +45,391 @@ export const generateHTML = (
       activeScenario = result.cenariosContemplacao;
   }
 
-  // --- CÁLCULOS DE PORCENTAGEM REVERSA (Para exibir na coluna de taxas) ---
+  const totalLanceGrafico = result.lanceTotal > 0 ? result.lanceTotal : 1; 
   const pctTaxaAdmin = (result.taxaAdminValor / result.creditoOriginal) * 100;
   const pctFundoReserva = (result.fundoReservaValor / result.creditoOriginal) * 100;
-  
-  // Lances
-  const lanceEmbutidoVal = result.lanceTotal - input.lanceBolso - result.lanceCartaVal;
-  const lanceTotalPct = (result.lanceTotal / result.creditoOriginal) * 100;
 
-  // Percentuais de alocação do lance (Intenção do usuário)
-  const pctAbatidoPrazo = 100 - input.percentualLanceParaParcela;
-  const pctAbatidoParcela = input.percentualLanceParaParcela;
-
-  // --- PREPARAÇÃO DO HTML DA PARCELA NO PRODUTO ---
-  let parcelasHtml = '';
-  if (result.valorAdesao > 0) {
-      parcelasHtml = `
-          <div class="data-row">
-              <span class="data-key">1ª PARCELA (C/ ADESÃO):</span>
-              <span class="data-val font-bold">${formatBRL(result.totalPrimeiraParcela)}</span>
-          </div>
-          <div class="data-row">
-              <span class="data-key">DEMAIS PARCELAS:</span>
-              <span class="data-val text-blue font-bold">${formatBRL(result.parcelaPreContemplacao)}</span>
-          </div>
-      `;
-  } else {
-      parcelasHtml = `
-          <div class="data-row">
-              <span class="data-key">VALOR PARCELA:</span>
-              <span class="data-val text-blue font-bold">${formatBRL(result.parcelaPreContemplacao)}</span>
-          </div>
-      `;
-  }
-
-  // --- GERAR LINHAS DA TABELA DE PREVISÃO ---
-  const tableRows = activeScenario.map((cenario, index) => `
-    <tr class="${index % 2 === 0 ? 'bg-gray' : ''}">
-      <td style="text-align: center;">${cenario.mes}º</td>
-      <td style="color: #166534; font-weight: bold;">${formatBRL(cenario.novaParcela)}</td>
-      <td style="text-align: center;">${Math.round(cenario.novoPrazo)}x</td>
-      <td style="font-size: 9px; color: #555;">${cenario.amortizacaoInfo}</td>
+  // Tabela Otimizada Visualmente
+  const tableRows = activeScenario.slice(0, 12).map((c, i) => `
+    <tr class="${i % 2 !== 0 ? 'row-alt' : ''}">
+        <td class="text-center font-bold text-dark">${c.mes}º</td>
+        <td class="text-primary font-bold">${formatBRL(c.novaParcela)}</td>
+        <td class="text-center text-dark">${Math.round(c.novoPrazo)}x</td>
+        <td class="text-xs text-muted" style="text-align: right;">${c.amortizacaoInfo}</td>
     </tr>
   `).join('');
 
-  // --- HTML COMPLETO ---
   return `
+    <!DOCTYPE html>
     <html>
       <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta charset="utf-8" />
+        <title>Simulação de Consórcio</title>
         <style>
-          @page { margin: 20px; }
-          body { font-family: 'Arial', sans-serif; font-size: 10px; color: #333; line-height: 1.3; }
-          
-          /* LAYOUT */
-          .container { width: 100%; max-width: 800px; margin: 0 auto; }
-          .row { display: flex; width: 100%; }
-          .col { flex: 1; padding: 5px; }
-          .col-33 { width: 33.33%; float: left; padding: 5px; box-sizing: border-box; }
-          
-          /* CABEÇALHO */
-          .header-box { border: 1px solid #000; padding: 10px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
-          .logo-area { font-size: 18px; font-weight: bold; color: #0F172A; text-transform: uppercase; }
-          .slogan { font-size: 10px; color: #555; margin-top: 2px; }
-          .date-area { text-align: right; font-size: 10px; }
+            @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;600;700;800&family=Open+Sans:wght@400;600&display=swap');
+            
+            :root {
+                --primary: #003366; /* Azul Escuro Institucional */
+                --accent: #00a859;  /* Verde Recon/Dinheiro */
+                --highlight: #2563eb; /* Azul Vibrante */
+                --text: #1e293b;
+                --text-muted: #64748b;
+                --bg-light: #f8fafc;
+                --border: #e2e8f0;
+            }
 
-          /* DADOS CLIENTE */
-          .client-box { border: 1px solid #000; margin-bottom: 15px; }
-          .client-row { border-bottom: 1px solid #ccc; display: flex; }
-          .client-row:last-child { border-bottom: none; }
-          .client-cell { flex: 1; padding: 5px 8px; border-right: 1px solid #ccc; }
-          .client-cell:last-child { border-right: none; }
-          .label { font-weight: bold; font-size: 9px; color: #000; text-transform: uppercase; }
-          .field-value { font-size: 10px; margin-top: 2px; }
+            body { 
+                font-family: 'Open Sans', sans-serif; 
+                margin: 0; 
+                padding: 0; 
+                color: var(--text); 
+                background: #fff;
+                -webkit-print-color-adjust: exact;
+            }
+            
+            /* PAGE SETUP */
+            .page {
+                width: 210mm;
+                min-height: 297mm;
+                padding: 10mm 15mm;
+                margin: 0 auto;
+                position: relative;
+                box-sizing: border-box;
+                border-top: 8px solid var(--primary); /* Identidade visual no topo */
+            }
 
-          /* GRADE DE 3 COLUNAS (PRODUTO | TAXAS | LANCES) */
-          .main-grid { border: 1px solid #000; margin-bottom: 15px; overflow: hidden; }
-          .grid-header { background-color: #0F172A; color: white; font-weight: bold; padding: 5px; text-align: center; text-transform: uppercase; font-size: 10px; }
-          .grid-col { border-right: 1px solid #000; }
-          .grid-col:last-child { border-right: none; }
-          
-          .data-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dotted #ddd; }
-          .data-row:last-child { border-bottom: none; }
-          .data-key { font-weight: bold; font-size: 9px; }
-          .data-val { text-align: right; font-size: 9px; }
-          
-          /* PREVISÃO */
-          .projection-box { border: 1px solid #000; margin-top: 10px; }
-          table { width: 100%; border-collapse: collapse; }
-          th { background-color: #ccc; font-weight: bold; font-size: 9px; padding: 5px; border-bottom: 1px solid #000; text-align: left; }
-          td { padding: 5px; font-size: 10px; border-bottom: 1px solid #eee; }
-          .bg-gray { background-color: #f9f9f9; }
+            /* WATERMARK */
+            .watermark {
+                position: absolute;
+                top: 55%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                width: 70%;
+                opacity: 0.03;
+                z-index: 0;
+            }
 
-          .footer { margin-top: 30px; font-size: 8px; text-align: center; color: #777; border-top: 1px solid #ccc; padding-top: 5px; }
-          
-          /* UTILITÁRIOS DE COR */
-          .text-blue { color: #0F172A; }
-          .text-green { color: #166534; }
-          .font-bold { font-weight: bold; }
+            .content { position: relative; z-index: 10; }
+
+            /* HEADER REDESENHADO */
+            .header {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                margin-bottom: 25px;
+                text-align: center;
+            }
+            .logo { 
+                height: 85px; /* Aumentado conforme solicitado */
+                margin-bottom: 12px;
+                object-fit: contain;
+            }
+            .header-title { 
+                font-family: 'Montserrat', sans-serif; 
+                font-size: 24px; 
+                font-weight: 800; 
+                color: var(--primary); 
+                text-transform: uppercase; 
+                letter-spacing: -0.5px; 
+            }
+            .header-sub { 
+                font-size: 11px; 
+                color: var(--text-muted); 
+                margin-top: 4px; 
+                text-transform: uppercase; 
+                letter-spacing: 2px;
+            }
+
+            /* INFO BAR CLEAN */
+            .info-container {
+                display: flex;
+                justify-content: space-between;
+                border-bottom: 1px solid var(--border);
+                border-top: 1px solid var(--border);
+                padding: 12px 5px;
+                margin-bottom: 25px;
+                background-color: #fafafa;
+            }
+            .info-box { width: 48%; }
+            .info-label { font-size: 8px; color: var(--text-muted); text-transform: uppercase; font-weight: 700; margin-bottom: 2px; }
+            .info-val { font-family: 'Montserrat', sans-serif; font-size: 13px; color: var(--text); font-weight: 600; }
+
+            /* GRID DE CARDS */
+            .main-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr 1fr;
+                gap: 12px;
+                margin-bottom: 20px;
+            }
+            
+            .card {
+                background: #fff;
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                padding: 15px;
+                position: relative;
+                box-shadow: 0 2px 5px rgba(0,0,0,0.03);
+            }
+            
+            /* Bordas Coloridas Laterais para Identidade Visual */
+            .card-credit { border-left: 5px solid var(--accent); }
+            .card-costs  { border-left: 5px solid var(--primary); }
+            .card-bid    { border-left: 5px solid #8b5cf6; } /* Roxo para destaque */
+
+            .card-title {
+                font-family: 'Montserrat', sans-serif;
+                font-size: 10px;
+                font-weight: 700;
+                text-transform: uppercase;
+                color: var(--text-muted);
+                margin-bottom: 12px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }
+
+            .card-row {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 8px;
+                font-size: 10px;
+                border-bottom: 1px dashed #f1f5f9;
+                padding-bottom: 2px;
+            }
+            .card-row:last-child { border-bottom: none; margin-bottom: 0; }
+            
+            .key { color: var(--text-muted); font-weight: 500; }
+            .val { color: var(--text); font-weight: 700; }
+            
+            .big-number {
+                font-family: 'Montserrat', sans-serif;
+                font-size: 20px;
+                font-weight: 800;
+                color: var(--accent);
+                display: block;
+                margin-top: 2px;
+                margin-bottom: 10px;
+            }
+            
+            .total-cost-val { color: var(--primary); font-size: 14px; font-weight: 800; }
+            .total-bid-val { color: #8b5cf6; font-size: 14px; font-weight: 800; }
+
+            /* TAGS */
+            .badge {
+                padding: 2px 6px;
+                border-radius: 4px;
+                font-size: 8px;
+                font-weight: 800;
+                text-transform: uppercase;
+            }
+            .bg-light-blue { background: #e0f2fe; color: #0369a1; }
+            .bg-light-green { background: #dcfce7; color: #15803d; }
+
+            /* ALLOCATION BAR */
+            .allocation-bar {
+                background: #f8fafc;
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                padding: 10px 15px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 20px;
+            }
+            .alloc-text { font-size: 10px; font-weight: 600; color: #475569; }
+            .alloc-highlight { color: var(--primary); font-weight: 800; }
+
+            /* TABLE STYLING */
+            .table-wrapper {
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                overflow: hidden;
+                margin-bottom: 20px;
+            }
+            table { width: 100%; border-collapse: collapse; font-size: 10px; }
+            th { 
+                background: #f1f5f9; 
+                color: var(--text); 
+                padding: 10px; 
+                text-align: left; 
+                font-family: 'Montserrat', sans-serif;
+                font-weight: 700; 
+                text-transform: uppercase; 
+                font-size: 8px;
+                border-bottom: 2px solid #e2e8f0;
+            }
+            td { padding: 10px; border-bottom: 1px solid #f1f5f9; color: #334155; }
+            .row-alt { background: #fafafa; }
+            
+            .text-center { text-align: center; }
+            .text-primary { color: var(--primary); }
+            .text-muted { color: #94a3b8; }
+            .font-bold { font-weight: 700; }
+            .text-xs { font-size: 8px; }
+
+            /* FOOTER */
+            .footer {
+                text-align: center;
+                border-top: 1px solid var(--border);
+                padding-top: 15px;
+                margin-top: auto;
+            }
+            .footer p { margin: 2px 0; font-size: 8px; color: #94a3b8; }
+            
+            .note-box {
+                margin-top: 10px;
+                padding: 8px;
+                background: #fffbeb;
+                border: 1px solid #fcd34d;
+                border-radius: 4px;
+                color: #b45309;
+                font-size: 9px;
+                text-align: center;
+            }
+
         </style>
       </head>
       <body>
-        <div class="container">
+        <div class="page">
+            <img src="${WATERMARK_IMG}" class="watermark" />
             
-            <!-- 1. CABEÇALHO -->
-            <div class="header-box">
-                <div>
-                    <div class="logo-area">CONSÓRCIO RECON</div>
-                    <div class="slogan">Junto com você em cada conquista.</div>
+            <div class="content">
+                
+                <div class="header">
+                    <img src="${LOGO_IMG}" class="logo" alt="Logo" />
+                    <div class="header-title">Proposta Comercial</div>
+                    <div class="header-sub">Simulação de Consórcio • ${formatDate()}</div>
                 </div>
-                <div class="date-area">
-                    <div>Data: ${formatDate()}</div>
-                    <div style="margin-top:4px;">Representante: Consórcio Nacional Recon</div>
-                </div>
-            </div>
 
-            <!-- 2. DADOS DO CLIENTE (PREENCHIDOS VIA APP) -->
-            <div class="client-box">
-                <div class="client-row">
-                    <div class="client-cell">
-                        <div class="label">Cliente:</div>
-                        <div class="field-value">${pdfData.cliente || '__________________________________________'}</div>
+                <div class="info-container">
+                    <div class="info-box">
+                        <div class="info-label">Cliente</div>
+                        <div class="info-val">${pdfData.cliente || 'Nome do Cliente'}</div>
+                        <div style="font-size: 10px; color: #64748b; margin-top: 2px;">${pdfData.telefoneCliente || ''}</div>
                     </div>
-                    <div class="client-cell">
-                        <div class="label">Telefone:</div>
-                        <div class="field-value">${pdfData.telefone || '(___) _____-____'}</div>
-                    </div>
-                </div>
-                <div class="client-row">
-                    <div class="client-cell">
-                        <div class="label">Vendedor:</div>
-                        <div class="field-value">${pdfData.vendedor || '__________________________________________'}</div>
-                    </div>
-                    <div class="client-cell">
-                        <div class="label">Plano Selecionado:</div>
-                        <div class="field-value font-bold">${result.plano} (${cenarioTitulo})</div>
+                    <div class="info-box" style="text-align: right;">
+                        <div class="info-label">Consultor</div>
+                        <div class="info-val">${pdfData.vendedor || 'Representante Autorizado'}</div>
+                        <div style="font-size: 10px; color: #64748b; margin-top: 2px;">${pdfData.telefoneVendedor || ''}</div>
                     </div>
                 </div>
-            </div>
 
-            <!-- 3. BLOCO PRINCIPAL (3 COLUNAS) -->
-            <div class="main-grid">
-                <div style="display: flex;">
+                <div class="main-grid">
                     
-                    <!-- COLUNA 1: PRODUTO -->
-                    <div class="col grid-col">
-                        <div class="grid-header">PRODUTO</div>
-                        <div style="padding: 5px;">
-                            <div class="data-row">
-                                <span class="data-key">CRÉDITO ORIGINAL:</span>
-                                <span class="data-val">${formatBRL(result.creditoOriginal)}</span>
-                            </div>
-                            
-                            <!-- PARCELAS (INSERÇÃO DINÂMICA) -->
-                            ${parcelasHtml}
+                    <div class="card card-credit">
+                        <div class="card-title">
+                            <span>Plano & Crédito</span>
+                            <span class="badge bg-light-green">${result.plano}</span>
+                        </div>
+                        
+                        <div style="margin-bottom: 10px;">
+                            <span class="key" style="font-size: 9px;">CRÉDITO LÍQUIDO</span>
+                            <span class="big-number">${formatBRL(creditoConsiderado)}</span>
+                        </div>
 
-                            <div class="data-row">
-                                <span class="data-key">PRAZO:</span>
-                                <span class="data-val">${input.prazo} meses</span>
-                            </div>
-                            <div class="data-row" style="margin-top: 10px; border-top: 1px solid #000; padding-top: 5px;">
-                                <span class="data-key">CRÉDITO LÍQUIDO:</span>
-                                <span class="data-val font-bold" style="font-size: 11px;">${formatBRL(creditoConsiderado)}</span>
-                            </div>
+                        <div class="card-row">
+                            <span class="key">Crédito Original</span>
+                            <span class="val">${formatBRL(result.creditoOriginal)}</span>
+                        </div>
+                        <div class="card-row">
+                            <span class="key">Parcela Cheia</span>
+                            <span class="val font-bold">${formatBRL(result.parcelaPreContemplacao)}</span>
+                        </div>
+                         <div class="card-row">
+                            <span class="key">Prazo</span>
+                            <span class="val">${input.prazo} Meses</span>
+                        </div>
+                        ${isSpecial ? `
+                        <div class="card-row">
+                            <span class="key">Opção</span>
+                            <span class="val" style="color: var(--highlight);">${cenarioTitulo}</span>
+                        </div>` : ''}
+                    </div>
+
+                    <div class="card card-costs">
+                        <div class="card-title">
+                            <span>Taxas & Seguros</span>
+                            <span class="badge bg-light-blue">Detalhes</span>
+                        </div>
+                        <div class="card-row">
+                            <span class="key">Taxa Adm. (${formatPct(pctTaxaAdmin)})</span>
+                            <span class="val">${formatBRL(result.taxaAdminValor)}</span>
+                        </div>
+                        <div class="card-row">
+                            <span class="key">Fundo Res. (${formatPct(pctFundoReserva)})</span>
+                            <span class="val">${formatBRL(result.fundoReservaValor)}</span>
+                        </div>
+                        <div class="card-row">
+                            <span class="key">Seguro (Mês)</span>
+                            <span class="val">${formatBRL(result.seguroMensal)}</span>
+                        </div>
+                        <div class="card-row">
+                            <span class="key">Adesão</span>
+                            <span class="val">${formatBRL(result.valorAdesao)}</span>
+                        </div>
+                         <div style="margin-top: 10px; border-top: 1px solid #e2e8f0; padding-top: 8px;">
+                            <span class="key" style="display:block; font-size: 8px; margin-bottom: 2px;">CUSTO TOTAL</span>
+                            <span class="total-cost-val">${formatBRL(result.custoTotal)}</span>
                         </div>
                     </div>
 
-                    <!-- COLUNA 2: TAXAS E SEGUROS -->
-                    <div class="col grid-col">
-                        <div class="grid-header">TAXAS E SEGUROS</div>
-                        <div style="padding: 5px;">
-                            <div class="data-row">
-                                <span class="data-key">TAXA ADM (${pctTaxaAdmin.toFixed(2)}%):</span>
-                                <span class="data-val">${formatBRL(result.taxaAdminValor)}</span>
-                            </div>
-                            <div class="data-row">
-                                <span class="data-key">FUNDO RESERVA (${pctFundoReserva.toFixed(0)}%):</span>
-                                <span class="data-val">${formatBRL(result.fundoReservaValor)}</span>
-                            </div>
-                            <div class="data-row">
-                                <span class="data-key">SEGURO (MENSAL):</span>
-                                <span class="data-val">${formatBRL(result.seguroMensal)}</span>
-                            </div>
-                             <div class="data-row">
-                                <span class="data-key">ADESÃO:</span>
-                                <span class="data-val">${formatBRL(result.valorAdesao)}</span>
-                            </div>
-                            <div class="data-row" style="margin-top: 10px; border-top: 1px solid #000; padding-top: 5px;">
-                                <span class="data-key">CUSTO TOTAL:</span>
-                                <span class="data-val font-bold">${formatBRL(result.custoTotal)}</span>
-                            </div>
+                    <div class="card card-bid">
+                        <div class="card-title">
+                            <span>Composição de Lance</span>
                         </div>
-                    </div>
-
-                    <!-- COLUNA 3: LANCES -->
-                    <div class="col grid-col">
-                        <div class="grid-header">LANCES</div>
-                        <div style="padding: 5px;">
-                             <div class="data-row">
-                                <span class="data-key">LANCE LIVRE (BOLSO):</span>
-                                <span class="data-val">${formatBRL(input.lanceBolso)}</span>
-                            </div>
-                            <div class="data-row">
-                                <span class="data-key">LANCE EMBUTIDO:</span>
-                                <span class="data-val">${formatBRL(lanceEmbutidoVal)}</span>
-                            </div>
-                             <div class="data-row">
-                                <span class="data-key">CARTA AVALIAÇÃO:</span>
-                                <span class="data-val">${formatBRL(result.lanceCartaVal)}</span>
-                            </div>
-                            <div class="data-row" style="border-bottom: 1px solid #000;">
-                                <span class="data-key">TOTAL LANCE:</span>
-                                <span class="data-val font-bold text-green">${formatBRL(result.lanceTotal)}</span>
-                            </div>
-                            <div class="data-row" style="margin-top: 5px;">
-                                <span class="data-key">PERCENTUAL TOTAL:</span>
-                                <span class="data-val font-bold">${formatPct(lanceTotalPct)}</span>
-                            </div>
+                        <div class="card-row">
+                            <span class="key">Recurso Próprio</span>
+                            <span class="val">${formatBRL(input.lanceBolso)}</span>
                         </div>
-                    </div>
-
-                </div>
-            </div>
-
-            <!-- 4. ALOCAÇÃO DO LANCE -->
-            ${result.lanceTotal > 0 ? `
-            <div style="border: 1px solid #000; padding: 5px; margin-bottom: 15px; background-color: #f0f0f0;">
-                <div style="display: flex; justify-content: space-around; font-size: 9px;">
-                    <div>
-                        <strong>DESTINO DO LANCE:</strong>
-                    </div>
-                    <div>
-                        ABATIMENTO NO PRAZO: <strong>${formatPct(pctAbatidoPrazo)}</strong>
-                    </div>
-                    <div>
-                        ABATIMENTO NA PARCELA: <strong>${formatPct(pctAbatidoParcela)}</strong>
+                        <div class="card-row">
+                            <span class="key">Lance Embutido</span>
+                            <span class="val">${formatBRL(result.lanceTotal - input.lanceBolso - result.lanceCartaVal)}</span>
+                        </div>
+                        <div class="card-row">
+                            <span class="key">Carta Avaliação</span>
+                            <span class="val">${formatBRL(result.lanceCartaVal)}</span>
+                        </div>
+                         <div style="margin-top: 10px; border-top: 1px solid #e2e8f0; padding-top: 8px;">
+                            <span class="key" style="display:block; font-size: 8px; margin-bottom: 2px;">LANCE TOTAL OFERTADO</span>
+                            <span class="total-bid-val">${formatBRL(result.lanceTotal)}</span>
+                        </div>
                     </div>
                 </div>
-            </div>
-            ` : ''}
 
-            <!-- 5. TABELA DE PREVISÃO -->
-            <div class="projection-box">
-                <div class="grid-header" style="background-color: #334155;">PREVISÃO PÓS-CONTEMPLAÇÃO (PRÓXIMOS 5 MESES)</div>
-                <table>
-                    <thead>
-                        <tr>
-                            <th style="text-align: center;">MÊS</th>
-                            <th>NOVA PARCELA</th>
-                            <th style="text-align: center;">NOVO PRAZO</th>
-                            <th>OBSERVAÇÃO</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${tableRows}
-                    </tbody>
-                </table>
-            </div>
+                ${result.lanceTotal > 0 ? `
+                <div class="allocation-bar">
+                    <span class="alloc-text">DESTINO DO LANCE:</span>
+                    <span class="alloc-text">Reduzir Prazo: <span class="alloc-highlight">${input.percentualLanceParaParcela < 100 ? `${(100 - input.percentualLanceParaParcela).toFixed(0)}%` : '0%'}</span></span>
+                    <span class="alloc-text">Reduzir Parcela: <span class="alloc-highlight">${input.percentualLanceParaParcela.toFixed(0)}%</span></span>
+                </div>` : ''}
 
-            <div class="footer">
-                Documento gerado eletronicamente. Os valores apresentados são estimativas e podem sofrer alterações conforme as regras contratuais do grupo.
-                <br/>Simulador Interno - Uso Exclusivo.
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th class="text-center" style="width: 15%;">Mês</th>
+                                <th style="width: 30%;">Nova Parcela Prevista</th>
+                                <th class="text-center" style="width: 15%;">Prazo Restante</th>
+                                <th style="text-align: right; width: 40%;">Situação / Amortização</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${tableRows}
+                        </tbody>
+                    </table>
+                </div>
+                
+                ${quotaCount > 1 ? `
+                <div class="note-box">
+                    <strong>Atenção:</strong> Os valores acima representam a soma de <strong>${quotaCount} cotas</strong> simuladas em conjunto.
+                </div>` : ''}
+
+                <div class="footer">
+                    <p>Este documento é uma simulação preliminar e não garante contemplação. Valores sujeitos a alteração conforme tabela vigente.</p>
+                    <p>Recon Consórcios © ${new Date().getFullYear()} - Documento Gerado em ${formatDate()}</p>
+                </div>
             </div>
         </div>
       </body>
