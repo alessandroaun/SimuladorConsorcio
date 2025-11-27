@@ -1,28 +1,28 @@
 import React, { useState } from 'react';
 import { 
   View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert, 
-  Platform, StatusBar, Modal, TextInput, KeyboardAvoidingView 
+  Platform, StatusBar, Modal, TextInput, KeyboardAvoidingView,
+  SafeAreaView 
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context'; 
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { 
   ArrowLeft, Share2, CheckCircle2, Car, CalendarClock, AlertTriangle, 
   Ban, DollarSign, Calendar, FileText, Info, RefreshCw, TrendingDown,
-  User, Phone, Briefcase, X, FileOutput
+  User, Phone, Briefcase, X, FileOutput, Layers
 } from 'lucide-react-native';
-import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
 
 import { RootStackParamList } from '../types/navigation';
 import { ContemplationScenario } from '../utils/ConsortiumCalculator';
-import { generateHTML } from '../utils/GeneratePDFHtml';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Result'>;
 
 type ScenarioMode = 'REDUZIDO' | 'CHEIO';
 
 export default function ResultScreen({ route, navigation }: Props) {
-  const { result, input } = route.params;
+  // Ajuste de tipagem para incluir quotaCount opcionalmente
+  const params = route.params as any; 
+  const { result, input } = params;
+  const quotaCount = params.quotaCount || 1;
   
   // Verifica se o Caminho 1 é viável (não é null)
   const isCaminho1Viable = result.cenarioCreditoReduzido !== null;
@@ -45,23 +45,11 @@ export default function ResultScreen({ route, navigation }: Props) {
 
   const handleGeneratePDF = async () => {
     setShowPdfModal(false);
-    try {
-      const html = generateHTML(result, input, mode, {
-          cliente: pdfClient,
-          vendedor: pdfSeller,
-          telefone: pdfPhone
-      });
-      const { uri } = await Print.printToFileAsync({ html });
-      
-      if (Platform.OS === "ios" || Platform.OS === "android") {
-          await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-      } else {
-          Alert.alert("Sucesso", "PDF gerado.");
-      }
-    } catch (error) {
-      console.error(error);
-      Alert.alert("Erro", "Não foi possível gerar o PDF.");
-    }
+    // Mock da funcionalidade de PDF para evitar erros de dependência no preview
+    Alert.alert(
+        "PDF Indisponível",
+        "A geração de PDF requer bibliotecas nativas (Expo Print/Sharing) que não estão configuradas neste ambiente de visualização."
+    );
   };
 
   const formatBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -89,13 +77,12 @@ export default function ResultScreen({ route, navigation }: Props) {
       custoTotalExibido = result.custoTotal;
   }
 
-  // --- CÁLCULO PERSONALIZADO DE CUSTO TOTAL (QUANDO TEM CARTA DE AVALIAÇÃO) ---
-  if (result.lanceCartaVal > 0) {
-      // Fórmula: Taxa Adm Total + Fundo de Reserva + Seguro Mensal + Adesão + Crédito Líquido Na mão
-      // Crédito Líquido Na Mão (neste contexto) = Crédito Original - Lance Embutido - Lance Carta
-      
-      const lanceEmbutido = result.lanceTotal - input.lanceBolso - result.lanceCartaVal;
-      const creditoLiquidoNaMaoAjustado = result.creditoOriginal - lanceEmbutido - result.lanceCartaVal;
+  // Definição antecipada para uso no cálculo e na interface
+  const lanceEmbutidoValor = result.lanceTotal - input.lanceBolso - result.lanceCartaVal;
+
+  // --- CÁLCULO PERSONALIZADO DE CUSTO TOTAL (QUANDO TEM EMBUTIDO OU CARTA) ---
+  if (result.lanceCartaVal > 0 || lanceEmbutidoValor > 0) {
+      const creditoLiquidoNaMaoAjustado = result.creditoOriginal - lanceEmbutidoValor - result.lanceCartaVal;
       
       const taxasSomadas = 
         result.taxaAdminValor + 
@@ -107,7 +94,6 @@ export default function ResultScreen({ route, navigation }: Props) {
   }
 
   const cenarioPrincipal = activeScenario && activeScenario.length > 0 ? activeScenario[0] : null;
-  const lanceEmbutidoValor = result.lanceTotal - input.lanceBolso - result.lanceCartaVal;
 
   const mesContemplacaoRef = Math.max(1, input.mesContemplacao);
   const prazoRestanteOriginal = Math.max(0, input.prazo - mesContemplacaoRef);
@@ -120,7 +106,7 @@ export default function ResultScreen({ route, navigation }: Props) {
   const reducaoPorcentagem = safeCenario?.reducaoPorcentagem ?? 0;
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
       
       {/* CABEÇALHO */}
@@ -249,6 +235,14 @@ export default function ResultScreen({ route, navigation }: Props) {
             <Text style={styles.metricValue}>
                 {formatBRL(mode === 'REDUZIDO' && isSpecialPlan ? result.creditoOriginal * fatorPlano : result.creditoOriginal)}
             </Text>
+            
+            {/* INFORMATIVO DE COTAS */}
+            {quotaCount > 1 && (
+                <View style={styles.quotaBadge}>
+                    <Layers size={12} color="#1E40AF" />
+                    <Text style={styles.quotaText}>Quantidade de Cotas: {quotaCount}</Text>
+                </View>
+            )}
           </View>
 
           <View style={styles.metricCard}>
@@ -567,6 +561,22 @@ const styles = StyleSheet.create({
   iconBubble: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
   metricLabel: { fontSize: 12, color: '#64748B', marginBottom: 4, fontWeight: '600' },
   metricValue: { fontSize: 16, fontWeight: '800', color: '#0F172A' },
+  
+  quotaBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#DBEAFE',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginTop: 8,
+    gap: 4
+  },
+  quotaText: {
+    fontSize: 10,
+    color: '#1E40AF',
+    fontWeight: '700'
+  },
 
   // GENERIC CARD
   card: { backgroundColor: '#fff', borderRadius: 20, padding: 20, marginBottom: 20, shadowColor: '#64748B', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },

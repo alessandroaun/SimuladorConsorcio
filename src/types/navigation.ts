@@ -1,9 +1,13 @@
+import { TableMetadata } from '../../data/TableRepository';
 import { SimulationResult, SimulationInput } from '../utils/ConsortiumCalculator';
-import { TableMetadata } from '../../data/TableRepository'; 
 
 export type RootStackParamList = {
-  Home: { tables?: TableMetadata[] };
-  TableSelection: { category: string; tables: TableMetadata[] }; 
+  Home: undefined;
+  TableSelection: undefined;
   SimulationForm: { table: TableMetadata };
-  Result: { result: SimulationResult; input: SimulationInput };
+  Result: { 
+    result: SimulationResult; 
+    input: SimulationInput;
+    quotaCount: number; // Adicionado aqui para corrigir o erro de tipo
+  };
 };

@@ -1,15 +1,15 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   View, Text, TouchableOpacity, ScrollView, StyleSheet, TextInput, 
-  Alert, Switch, Modal, KeyboardAvoidingView, Platform, StatusBar,
+  Alert, Modal, KeyboardAvoidingView, Platform, StatusBar,
   SafeAreaView
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { 
-  ArrowLeft, Calculator, DollarSign, ShieldCheck, Lock, 
-  CalendarDays, PieChart, Percent, ChevronDown, X, Clock, Wand2, AlertTriangle, 
-  ChevronRight, Settings2, Wallet, Banknote, Car
+  ArrowLeft, Lock, CalendarDays, PieChart, ChevronDown, X, Clock, Wand2, ChevronRight, 
+  AlertTriangle, Settings2, Wallet, Car, PlusCircle, Trash2
 } from 'lucide-react-native';
+
 import { RootStackParamList } from '../types/navigation';
 import { getTableData } from '../../data/TableRepository';
 import { ConsortiumCalculator, SimulationInput, InstallmentType } from '../utils/ConsortiumCalculator';
@@ -22,6 +22,8 @@ const ADESAO_OPTIONS = [
   { label: '1%', value: 0.01 },
   { label: '2%', value: 0.02 },
 ];
+
+const MAX_CREDITS = 50;
 
 // --- HELPER: MÁSCARA DE MOEDA ---
 const formatCurrencyInput = (value: string) => {
@@ -42,14 +44,18 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
   const scrollViewRef = useRef<ScrollView>(null);
 
   // --- STATES ---
-  const [creditoInput, setCreditoInput] = useState('');
+  const [credits, setCredits] = useState<string[]>(['']); // Inicia com 1 slot vazio
+
   const [prazoIdx, setPrazoIdx] = useState<number | null>(null);
   const [tipoParcela, setTipoParcela] = useState<InstallmentType>('S/SV');
   const [adesaoPct, setAdesaoPct] = useState(0);
   const [mesContemplacaoInput, setMesContemplacaoInput] = useState(''); 
 
   const [showLanceModal, setShowLanceModal] = useState(false);
+  
+  // Controle do Modal de Crédito
   const [showCreditModal, setShowCreditModal] = useState(false);
+  const [editingIndex, setEditingIndex] = useState<number>(0); 
   
   const [lanceEmbInput, setLanceEmbInput] = useState(''); 
   const [lanceBolso, setLanceBolso] = useState('');       
@@ -64,12 +70,41 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
   // --- HELPERS E CÁLCULOS ---
   const availableCredits = useMemo(() => rawData.map(r => r.credito).sort((a,b) => a-b), [rawData]);
   
-  const selectedRow = useMemo(() => {
-    const val = parseFloat(creditoInput);
+  // Seleção da Linha Principal (Baseado no primeiro crédito para definir prazos)
+  const mainRow = useMemo(() => {
+    const val = parseFloat(credits[0]);
     return rawData.find(r => r.credito === val) || null;
-  }, [creditoInput, rawData]);
+  }, [credits, rawData]);
 
-  const availablePrazos = selectedRow ? selectedRow.prazos : [];
+  // --- LÓGICA DE INTERSECÇÃO DE PRAZOS (ADAPTAÇÃO AUTOMÁTICA) ---
+  const availablePrazos = useMemo(() => {
+    // 1. Identificar créditos válidos selecionados
+    const validValues = credits
+        .map(c => parseFloat(c))
+        .filter(v => v > 0);
+    
+    // Se não houver crédito selecionado, retorna vazio
+    if (validValues.length === 0) return [];
+
+    // 2. Buscar as linhas (Rows) completas na tabela para cada crédito
+    const rows = validValues
+        .map(v => rawData.find(r => r.credito === v))
+        .filter(r => !!r);
+    
+    // Se algum crédito não foi encontrado na tabela (improvável), retorna vazio
+    if (rows.length === 0) return [];
+
+    // 3. Intersecção: Começa com os prazos do PRIMEIRO crédito
+    const basePrazos = rows[0]!.prazos;
+
+    // Filtra para manter APENAS os prazos que existem em TODAS as linhas selecionadas
+    const commonPrazos = basePrazos.filter((pBase: any) => {
+        const prazoNum = pBase.prazo;
+        return rows.every(r => r!.prazos.some((p: any) => p.prazo === prazoNum));
+    });
+
+    return commonPrazos;
+  }, [credits, rawData]);
 
   const isSeguroObrigatorio = useMemo(() => {
     if (availablePrazos.length > 0) {
@@ -79,43 +114,77 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
     return false;
   }, [availablePrazos]);
 
+  // --- VALOR TOTAL DO CRÉDITO SOMADO ---
+  const totalCreditoSimulacao = useMemo(() => {
+      return credits.reduce((acc, curr) => acc + (parseFloat(curr) || 0), 0);
+  }, [credits]);
+
+  // --- CÁLCULO DA PARCELA SOMADA ---
   const currentParcelaValue = useMemo(() => {
-     if (!selectedRow || prazoIdx === null) return 0;
-     const p = availablePrazos[prazoIdx];
-     if (p.parcela) return p.parcela;
-     return tipoParcela === 'C/SV' ? p.parcela_CSV : p.parcela_SSV;
-  }, [selectedRow, prazoIdx, tipoParcela, availablePrazos]);
+     if (!mainRow || prazoIdx === null) return 0;
+     
+     // Recupera o objeto do prazo com segurança
+     const targetPrazoData = availablePrazos[prazoIdx];
+     if (!targetPrazoData) return 0;
+
+     const targetPrazo = targetPrazoData.prazo;
+     let totalParcela = 0;
+
+     // Itera sobre todos os créditos selecionados e soma as parcelas correspondentes ao prazo alvo
+     credits.forEach((creditValStr) => {
+         const val = parseFloat(creditValStr);
+         if (!val) return;
+
+         const row = rawData.find(r => r.credito === val);
+         if (row) {
+             const pData = row.prazos.find((p: any) => p.prazo === targetPrazo);
+             if (pData) {
+                 if (pData.parcela) totalParcela += pData.parcela;
+                 else totalParcela += (tipoParcela === 'C/SV' ? pData.parcela_CSV : pData.parcela_SSV);
+             }
+         }
+     });
+
+     return totalParcela;
+  }, [credits, rawData, prazoIdx, tipoParcela, availablePrazos, mainRow]);
 
   useEffect(() => {
     if (isSeguroObrigatorio) setTipoParcela('C/SV');
   }, [isSeguroObrigatorio]);
 
+  // Resetar o índice do prazo se o crédito principal mudar (para evitar índices inválidos)
   useEffect(() => {
-    setPrazoIdx(null); 
-    setLanceEmbInput('');
-    setLanceBolso('');
-    setLanceCartaInput('');
-  }, [creditoInput]);
+    if (!mainRow) {
+        setPrazoIdx(null); 
+    }
+  }, [credits[0]]);
+
+  // PROTEÇÃO EXTRA: Se a lista de prazos diminuir (intersecção) e o índice selecionado não existir mais, reseta.
+  useEffect(() => {
+    if (prazoIdx !== null && prazoIdx >= availablePrazos.length) {
+        setPrazoIdx(null);
+    }
+  }, [availablePrazos, prazoIdx]);
 
   const handleCurrencyChange = (text: string, setter: (val: string) => void) => {
       setter(formatCurrencyInput(text));
   };
   
-  const maxLancePermitido = selectedRow ? selectedRow.credito * table.maxLanceEmbutido : 0;
+  const maxLancePermitido = totalCreditoSimulacao * table.maxLanceEmbutido;
   
   const handleChangeLanceEmbutido = (text: string) => {
     const numericValue = parseCurrencyToFloat(text);
     if (numericValue > maxLancePermitido) {
       setLanceEmbInput(formatCurrencyInput(maxLancePermitido.toFixed(2).replace('.', '')));
-      Alert.alert("Limite Atingido", `O lance embutido máximo é de ${(table.maxLanceEmbutido * 100).toFixed(0)}% (${formatCurrency(maxLancePermitido)}).`);
+      Alert.alert("Limite Atingido", `O lance embutido máximo é de ${(table.maxLanceEmbutido * 100).toFixed(0)}% do total (${formatCurrency(maxLancePermitido)}).`);
     } else {
       setLanceEmbInput(formatCurrencyInput(text));
     }
   };
 
   const handleQuickLanceSelect = (pct: number) => {
-    if (!selectedRow) return;
-    const val = selectedRow.credito * pct;
+    if (totalCreditoSimulacao <= 0) return;
+    const val = totalCreditoSimulacao * pct;
     const valString = (val * 100).toFixed(0); 
     
     if (pct <= table.maxLanceEmbutido) {
@@ -133,7 +202,7 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
     if (pctParcela + pctPrazo !== 100) {
         if (pctParaParcelaInput !== '' && pctParaParcelaInput !== '100' && pctParaParcelaInput !== '0') {
             const newPrazo = Math.min(100, Math.max(0, 100 - pctParcela));
-            setPctParaPrazoInput(newPrazo.toString());
+            setPctParaParcelaInput(newPrazo.toString());
         } 
         else if (pctParaPrazoInput !== '' && pctParaPrazoInput !== '100' && pctParaPrazoInput !== '0') {
             const newParcela = Math.min(100, Math.max(0, 100 - pctPrazo));
@@ -153,7 +222,7 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
     if (type === 'parcela') {
       setPctParaParcelaInput(text);
       if (text === '') setPctParaPrazoInput('100');
-      else setPctParaPrazoInput(Math.min(100, Math.max(0, 100 - numericValue)).toString());
+      else setPctParaParcelaInput(Math.min(100, Math.max(0, 100 - numericValue)).toString());
     } else { 
       setPctParaPrazoInput(text);
       if (text === '') setPctParaParcelaInput('0');
@@ -161,13 +230,12 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
     }
   };
 
-  const currentCredito = selectedRow ? selectedRow.credito : 0;
   const valLanceEmb = parseCurrencyToFloat(lanceEmbInput);
   const valLanceBolso = parseCurrencyToFloat(lanceBolso);
   const valLanceCarta = parseCurrencyToFloat(lanceCartaInput);
   
   const totalLances = valLanceEmb + valLanceBolso + valLanceCarta;
-  const totalLancePct = currentCredito > 0 ? (totalLances / currentCredito) * 100 : 0;
+  const totalLancePct = totalCreditoSimulacao > 0 ? (totalLances / totalCreditoSimulacao) * 100 : 0;
 
   const dataEstimada = useMemo(() => {
     const mes = parseInt(mesContemplacaoInput);
@@ -178,7 +246,7 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
     return dataFutura.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
   }, [mesContemplacaoInput]);
 
-  // --- NOVA LÓGICA DE LIMITE ---
+  // --- VALIDAÇÃO DE LIMITE (REGRA 40%) ---
   const limitInfo = useMemo(() => {
     if (!currentParcelaValue || prazoIdx === null || totalLances === 0) {
         return { 
@@ -188,7 +256,9 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
           isExceeding40PercentRule: false 
         };
     }
-    const prazoTotal = availablePrazos[prazoIdx].prazo;
+    const prazoTotal = availablePrazos[prazoIdx]?.prazo;
+    if (!prazoTotal) return { isValid: false, message: '', maxPermittedPct: 0, isExceeding40PercentRule: false };
+
     const rawMes = parseInt(mesContemplacaoInput) || 1;
     const mesPrevisto = Math.min(prazoTotal, Math.max(1, rawMes));
     const prazoRestante = Math.max(1, prazoTotal - mesPrevisto); 
@@ -225,14 +295,43 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
     setPctParaPrazoInput((100 - maxPct).toString());
   };
 
+  // --- GESTÃO DE MÚLTIPLOS CRÉDITOS ---
+
+  const handleOpenCreditModal = (index: number) => {
+      setEditingIndex(index);
+      setShowCreditModal(true);
+  }
+
   const handleSelectCredit = (value: number) => {
-    setCreditoInput(value.toString());
+    const newCredits = [...credits];
+    newCredits[editingIndex] = value.toString();
+    setCredits(newCredits);
     setShowCreditModal(false);
   };
 
+  const handleAddCredit = () => {
+      if (credits.length >= MAX_CREDITS) {
+          Alert.alert("Limite Atingido", `Máximo de ${MAX_CREDITS} créditos permitidos.`);
+          return;
+      }
+      setCredits([...credits, '']);
+      setTimeout(() => handleOpenCreditModal(credits.length), 200);
+  };
+
+  const handleRemoveCredit = (indexToRemove: number) => {
+      if (credits.length <= 1) {
+          const newCredits = [...credits];
+          newCredits[0] = '';
+          setCredits(newCredits);
+          return;
+      }
+      const newCredits = credits.filter((_, idx) => idx !== indexToRemove);
+      setCredits(newCredits);
+  };
+
   const handleCalculate = () => {
-    if (!selectedRow || prazoIdx === null) {
-      Alert.alert("Dados incompletos", "Por favor, selecione um crédito válido e um prazo.");
+    if (!mainRow || prazoIdx === null) {
+      Alert.alert("Dados incompletos", "Por favor, selecione ao menos o primeiro crédito e um prazo.");
       return;
     }
     if(!currentParcelaValue) {
@@ -240,7 +339,12 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
        return;
     }
 
-    const prazoTotal = availablePrazos[prazoIdx].prazo;
+    const prazoTotal = availablePrazos[prazoIdx]?.prazo;
+    if (!prazoTotal) {
+         Alert.alert("Erro", "Prazo selecionado inválido ou indisponível para o conjunto de créditos.");
+         return;
+    }
+
     let mesContemplacao = parseInt(mesContemplacaoInput) || 1; 
     
     if (mesContemplacao > prazoTotal) {
@@ -249,11 +353,11 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
     }
     mesContemplacao = Math.max(1, mesContemplacao);
 
-    const lanceEmbPctCalculado = selectedRow.credito > 0 ? valLanceEmb / selectedRow.credito : 0;
+    const lanceEmbPctCalculado = totalCreditoSimulacao > 0 ? valLanceEmb / totalCreditoSimulacao : 0;
 
     const input: SimulationInput = {
       tableId: table.id,
-      credito: selectedRow.credito,
+      credito: totalCreditoSimulacao, // Soma total
       prazo: prazoTotal,
       tipoParcela,
       lanceBolso: valLanceBolso,
@@ -271,12 +375,16 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
     }
 
     const result = ConsortiumCalculator.calculate(input, table, currentParcelaValue);
-    navigation.navigate('Result', { result, input });
+    
+    // Calcula quantos créditos válidos existem (diferentes de zero)
+    const quotaCount = credits.filter(c => parseFloat(c) > 0).length;
+
+    // Passa 'quotaCount' para a tela de resultados
+    navigation.navigate('Result', { result, input, quotaCount });
   };
 
   const formatCurrency = (val: number) => val.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'});
 
-  // Styles Helpers
   const getButtonOpacity = () => limitInfo.isValid ? 1 : 0.5;
 
   return (
@@ -310,28 +418,91 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
           keyboardShouldPersistTaps="handled" 
         >
           
-         
-          {/* CRÉDITO HERO */}
-          <TouchableOpacity 
-             style={styles.heroCreditCard}
-             onPress={() => setShowCreditModal(true)}
-             activeOpacity={0.8}
-          >
-             <View style={styles.heroRow}>
-                 <Text style={styles.heroLabel}>VALOR DO CRÉDITO</Text>
-                 <View style={styles.heroEditIcon}>
-                    <ChevronDown size={16} color="#3B82F6" />
-                 </View>
-             </View>
-             
-             {creditoInput ? (
-                <Text style={styles.heroValue}>{formatCurrency(parseFloat(creditoInput))}</Text>
-             ) : (
-                <Text style={[styles.heroValue, {color: '#CBD5E1'}]}>R$ 0,00</Text>
-             )}
-             
-             <View style={styles.heroFooterLine} />
-          </TouchableOpacity>
+          {/* LISTA DE CRÉDITOS */}
+          {credits.map((creditVal, index) => {
+              const isFirst = index === 0;
+              const hasValue = !!creditVal;
+              
+              const titleText = credits.length > 1 ? `VALOR DO CRÉDITO ${index + 1}` : `VALOR DO CRÉDITO`;
+
+              return (
+                  <View key={index} style={{position: 'relative', marginBottom: isFirst ? 24 : 12}}>
+                      <TouchableOpacity 
+                        style={[
+                            styles.heroCreditCard, 
+                            !isFirst && { marginTop: -12, borderColor: '#3B82F6', zIndex: 1 } 
+                        ]}
+                        onPress={() => handleOpenCreditModal(index)}
+                        activeOpacity={0.8}
+                      >
+                        <View style={styles.heroRow}>
+                            <Text style={[
+                                styles.heroLabel, 
+                                !isFirst && {color: '#2563EB'}
+                            ]}>
+                                {titleText}
+                            </Text>
+                            <View style={[
+                                styles.heroEditIcon,
+                                !isFirst && {backgroundColor: '#DBEAFE'}
+                            ]}>
+                                <ChevronDown size={16} color={isFirst ? "#3B82F6" : "#2563EB"} />
+                            </View>
+                        </View>
+                        
+                        {hasValue ? (
+                            <Text style={[
+                                styles.heroValue, 
+                                !isFirst && {color: '#1E40AF'}
+                            ]}>
+                                {formatCurrency(parseFloat(creditVal))}
+                            </Text>
+                        ) : (
+                            <Text style={[
+                                styles.heroValue, 
+                                {color: isFirst ? '#CBD5E1' : '#93C5FD'}
+                            ]}>
+                                R$ 0,00
+                            </Text>
+                        )}
+                        
+                        <View style={[
+                            styles.heroFooterLine, 
+                            !isFirst && {backgroundColor: '#2563EB'}
+                        ]} />
+                      </TouchableOpacity>
+
+                      {!isFirst && (
+                         <TouchableOpacity 
+                            style={styles.removeBtn} 
+                            onPress={() => handleRemoveCredit(index)}
+                            hitSlop={{top:10, bottom:10, left:10, right:10}}
+                        >
+                            <Trash2 size={16} color="#EF4444" />
+                        </TouchableOpacity>
+                      )}
+                  </View>
+              );
+          })}
+
+          {/* BOTÃO ADICIONAR NOVO CRÉDITO */}
+          {credits.length < MAX_CREDITS && credits[0] !== '' && (
+            <TouchableOpacity 
+                style={styles.addCreditBtn} 
+                onPress={handleAddCredit}
+            >
+                <PlusCircle size={18} color="#fff" />
+                <Text style={styles.addCreditText}>Clique para adicionar mais um crédito a simulação</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* TOTALIZADOR VISUAL SE HOUVER MAIS DE 1 CRÉDITO */}
+          {credits.length > 1 && totalCreditoSimulacao > 0 && (
+              <View style={styles.totalSumContainer}>
+                  <Text style={styles.totalSumLabel}>TOTAL SIMULADO</Text>
+                  <Text style={styles.totalSumValue}>{formatCurrency(totalCreditoSimulacao)}</Text>
+              </View>
+          )}
 
           {/* PRAZOS */}
           <View style={styles.inputGroup}>
@@ -346,21 +517,23 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
                   key={idx} 
                   style={[styles.modernPill, idx === prazoIdx && styles.modernPillActive]}
                   onPress={() => setPrazoIdx(idx)}
-                  disabled={!creditoInput}
+                  disabled={!credits[0]}
                 >
                   <Text style={[styles.modernPillText, idx === prazoIdx && styles.modernPillTextActive]}>
                     {p.prazo}x
                   </Text>
                 </TouchableOpacity>
               )) : (
-                <Text style={styles.helperText}>Selecione o crédito acima primeiro.</Text>
+                <Text style={styles.helperText}>
+                    {credits[0] ? "Nenhum prazo comum a todos os créditos." : "Selecione o primeiro crédito acima."}
+                </Text>
               )}
             </ScrollView>
           </View>
 
-          {/* OPÇÕES ADICIONAIS (ADESAO E SEGURO) - LAYOUT GRID REVISADO */}
+          {/* OPÇÕES ADICIONAIS (ADESAO E SEGURO) */}
           <View style={styles.optionsRow}>
-              {/* ADESÃO - GRID 2x2 */}
+              {/* ADESÃO */}
               <View style={[styles.optionCol, { flex: 1.2 }]}>
                  <Text style={styles.miniLabel}>Taxa de Adesão</Text>
                  <View style={styles.gridContainer}>
@@ -378,7 +551,7 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
                  </View>
               </View>
 
-              {/* SEGURO - SWITCH REFORMULADO */}
+              {/* SEGURO */}
               <View style={[styles.optionCol, { flex: 0.8 }]}>
                  <Text style={styles.miniLabel}>Seguro Prestamista</Text>
                  <View style={{flex:1, justifyContent: 'center'}}>
@@ -408,15 +581,15 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
               </View>
           </View>
 
-          {/* CARD DE LANCES (MOVIDO PARA CIMA, SEM TÍTULO "PLANEJAMENTO") */}
+          {/* CARD DE LANCES */}
           <TouchableOpacity 
-            style={[styles.lanceSummaryCard, !selectedRow && styles.disabledCard]} 
+            style={[styles.lanceSummaryCard, !mainRow && styles.disabledCard]} 
             onPress={() => {
-              if (selectedRow) setShowLanceModal(true);
+              if (mainRow) setShowLanceModal(true);
               else Alert.alert("Atenção", "Selecione um valor de crédito primeiro.");
             }}
-            activeOpacity={selectedRow ? 0.8 : 1}
-            disabled={!creditoInput}
+            activeOpacity={mainRow ? 0.8 : 1}
+            disabled={!credits[0]}
           >
             <View style={styles.lanceSummaryLeft}>
                 <View style={[styles.iconCircle, totalLances > 0 ? {backgroundColor: '#ECFDF5'} : {backgroundColor: '#F1F5F9'}]}>
@@ -429,7 +602,7 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
                 {totalLances > 0 ? (
                     <View>
                         <Text style={styles.lanceSummaryValue}>{formatCurrency(totalLances)}</Text>
-                        <Text style={styles.lanceSummarySubtitle}>Equivale a {totalLancePct.toFixed(1)}% do crédito</Text>
+                        <Text style={styles.lanceSummarySubtitle}>Equivale a {totalLancePct.toFixed(1)}% do crédito total</Text>
                     </View>
                 ) : (
                     <Text style={styles.lanceSummarySubtitle}>Antecipe sua contemplação</Text>
@@ -445,7 +618,7 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
             </View>
           </TouchableOpacity>
 
-          {/* CONTEMPLAÇÃO (TIMELINE) */}
+          {/* TIMELINE CARD */}
           <View style={styles.timelineCard}>
              <View style={styles.timelineHeader}>
                  <CalendarDays color="#fff" size={18} />
@@ -483,7 +656,6 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
              </View>
           </View>
 
-          {/* ESPAÇO EXTRA */}
           <View style={{height: 120}} />
         </ScrollView>
       </KeyboardAvoidingView>
@@ -507,21 +679,28 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
             <View style={styles.modalSheet}>
                 <View style={styles.modalHandle} />
                 <View style={styles.modalHeader}>
-                    <Text style={styles.modalTitle}>Selecione o Crédito</Text>
+                    <Text style={styles.modalTitle}>
+                        Selecione o Crédito {editingIndex + 1}
+                    </Text>
                     <TouchableOpacity onPress={() => setShowCreditModal(false)} style={styles.closeBtn}>
                         <X color="#64748B" size={24} />
                     </TouchableOpacity>
                 </View>
                 
                 <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}>
-                    {availableCredits.map((credit, index) => (
-                    <TouchableOpacity key={index} style={[styles.creditOption, parseFloat(creditoInput) === credit && styles.creditOptionActive]} onPress={() => handleSelectCredit(credit)}>
-                        <Text style={[styles.creditOptionText, parseFloat(creditoInput) === credit && styles.creditOptionTextActive]}>
-                            {formatCurrency(credit)}
-                        </Text>
-                        {parseFloat(creditoInput) === credit && <View style={styles.checkCircle}><View style={styles.checkDot}/></View>}
-                    </TouchableOpacity>
-                    ))}
+                    {availableCredits.map((credit, index) => {
+                        const currentVal = parseFloat(credits[editingIndex]);
+                        const isSelected = currentVal === credit;
+                        
+                        return (
+                        <TouchableOpacity key={index} style={[styles.creditOption, isSelected && styles.creditOptionActive]} onPress={() => handleSelectCredit(credit)}>
+                            <Text style={[styles.creditOptionText, isSelected && styles.creditOptionTextActive]}>
+                                {formatCurrency(credit)}
+                            </Text>
+                            {isSelected && <View style={styles.checkCircle}><View style={styles.checkDot}/></View>}
+                        </TouchableOpacity>
+                        );
+                    })}
                 </ScrollView>
             </View>
         </View>
@@ -597,7 +776,7 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
                         </View>
                     </View>
 
-                    {/* ALOCAÇÃO - REPOSICIONADA E APROXIMADA */}
+                    {/* ALOCAÇÃO */}
                     <View style={{marginTop: 4}}>
                         <Text style={styles.modalSectionTitle}>Como usar o lance?</Text>
                         
@@ -638,7 +817,6 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
                                         />
                                         <Text style={styles.allocSuffix}>%</Text>
                                         
-                                        {/* BOTÃO MÁGICO (DENTRO DO CARD, REORGANIZADO) */}
                                         {totalLances > 0 && (
                                             <TouchableOpacity style={styles.magicBtnInline} onPress={handleSetMaxPct}>
                                                 <Text style={styles.magicBtnText}>Max</Text>
@@ -696,7 +874,7 @@ const styles = StyleSheet.create({
   header: { 
     flexDirection: 'row', 
     alignItems: 'center', 
-    justifyContent: 'space-between',
+    justifyContent: 'space-between', 
     paddingHorizontal: 24, 
     paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 16 : 60, 
     paddingBottom: 24, 
@@ -718,7 +896,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 24,
     padding: 24,
-    marginBottom: 24,
+    // marginBottom: 24, // Removido para controle individual
     shadowColor: '#64748B',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.08,
@@ -732,6 +910,57 @@ const styles = StyleSheet.create({
   heroEditIcon: { backgroundColor: '#EFF6FF', padding: 6, borderRadius: 8 },
   heroValue: { fontSize: 36, fontWeight: '800', color: '#0F172A', letterSpacing: -1 },
   heroFooterLine: { height: 4, width: 40, backgroundColor: '#3B82F6', borderRadius: 2, marginTop: 16 },
+
+  // ADD CREDIT BUTTON
+  addCreditBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: '#2563EB',
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderRadius: 16,
+      marginTop: -10, 
+      marginBottom: 24,
+      shadowColor: '#2563EB',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.2,
+      shadowRadius: 8,
+      elevation: 4
+  },
+  addCreditText: {
+      color: '#fff',
+      fontSize: 13,
+      fontWeight: '600',
+      marginLeft: 8
+  },
+  
+  // REMOVE CREDIT BUTTON
+  removeBtn: {
+      position: 'absolute',
+      top: -12 - 12, 
+      right: 12,
+      backgroundColor: '#FEF2F2',
+      padding: 8,
+      borderRadius: 12,
+      zIndex: 10
+  },
+
+  // TOTAL SUM
+  totalSumContainer: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      backgroundColor: '#F8FAFC',
+      borderWidth: 1,
+      borderColor: '#E2E8F0',
+      padding: 16,
+      borderRadius: 16,
+      marginBottom: 24
+  },
+  totalSumLabel: { fontSize: 12, fontWeight: '700', color: '#64748B', letterSpacing: 1 },
+  totalSumValue: { fontSize: 18, fontWeight: '800', color: '#1E293B' },
+
 
   // INPUT GROUPS (Prazos)
   inputGroup: { marginBottom: 16 },
