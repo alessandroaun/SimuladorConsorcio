@@ -2,7 +2,7 @@
   "metadata": [
     {
       "id": "t_auto_L",
-      "name": "Automóvel Plano Light (75%)",
+      "name": "Automóvel (75%)",
       "category": "AUTO",
       "plan": "LIGHT",
       "taxaAdmin": 0.20,
@@ -12,7 +12,7 @@
     },
     {
       "id": "t_auto_normal",
-      "name": "Automóvel Plano Normal",
+      "name": "Automóvel Normal",
       "category": "AUTO",
       "plan": "NORMAL",
       "taxaAdmin": 0.19,
@@ -22,7 +22,7 @@
     },
     {
       "id": "t_auto_SL",
-      "name": "Automóvel Plano Super Light (50%)",
+      "name": "Automóvel (50%)",
       "category": "AUTO",
       "plan": "SUPERLIGHT",
       "taxaAdmin": 0.22,
@@ -32,7 +32,7 @@
     },
     {
       "id": "t_auto5121_107_L",
-      "name": "Automóvel Grupo 5121 Plano Light (75%)",
+      "name": "Automóvel Grupo 5121 (75%)",
       "category": "AUTO",
       "plan": "LIGHT",
       "taxaAdmin": 0.20,
@@ -42,7 +42,7 @@
     },
     {
       "id": "t_auto5121_107_normal",
-      "name": "Automóvel Grupo 5121 Plano Normal",
+      "name": "Automóvel Grupo 5121 Normal",
       "category": "AUTO",
       "plan": "NORMAL",
       "taxaAdmin": 0.19,
@@ -52,7 +52,7 @@
     },
     {
       "id": "t_imovel_normal",
-      "name": "Imóvel Plano Normal",
+      "name": "Imóvel Normal",
       "category": "IMOVEL",
       "plan": "NORMAL",
       "taxaAdmin": 0.22,
@@ -62,7 +62,7 @@
     },
     {
       "id": "t_imovel2011_202_L",
-      "name": "Imóvel Grupo 2011 Plano Light (75%)",
+      "name": "Imóvel Grupo 2011 (75%)",
       "category": "IMOVEL",
       "plan": "LIGHT",
       "taxaAdmin": 0.25,
@@ -72,7 +72,7 @@
     },
     {
       "id": "t_imovel2011_202_SL",
-      "name": "Imóvel Grupo 2011 Plano Super Light (50%)",
+      "name": "Imóvel Grupo 2011 (50%)",
       "category": "IMOVEL",
       "plan": "SUPERLIGHT",
       "taxaAdmin": 0.25,
@@ -82,7 +82,7 @@
     },
     {
       "id": "t_imovel2011_202_normal",
-      "name": "Imóvel Grupo 2011 Plano Normal",
+      "name": "Imóvel Grupo 2011 Normal",
       "category": "IMOVEL",
       "plan": "NORMAL",
       "taxaAdmin": 0.25,
@@ -92,7 +92,7 @@
     },
     {
       "id": "t_moto_normal",
-      "name": "Moto Plano Normal",
+      "name": "Motocicleta Normal",
       "category": "MOTO",
       "plan": "NORMAL",
       "taxaAdmin": 0.19,
@@ -102,7 +102,7 @@
     },
     {
       "id": "t_servicos_normal",
-      "name": "Serviços Plano Normal",
+      "name": "Serviços Normal",
       "category": "SERVICOS",
       "plan": "NORMAL",
       "taxaAdmin": 0.20,

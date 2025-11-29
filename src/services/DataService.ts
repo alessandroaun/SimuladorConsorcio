@@ -16,7 +16,7 @@ const STORAGE_KEY_DATE = '@consorcio_last_update';
 // ==================================================================================
 
 //const REMOTE_API_URL = 'https://cdn.jsdelivr.net/gh/alessandroaun/SimuladorConsorcio@master/dados_consorcio.json';
-const REMOTE_API_URL = 'https://cdn.jsdelivr.net/gh/alessandroaun/SimuladorConsorcio@master/dados_consorcio.json';
+const REMOTE_API_URL = 'https://raw.githubusercontent.com/alessandroaun/SimuladorConsorcio/refs/heads/master/dados_consorcio.json';
 
 export interface AppData {
   tables: TableMetadata[];

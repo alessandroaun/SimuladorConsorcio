@@ -17,23 +17,23 @@ export interface TableMetadata {
 // 2. Lista de Tabelas Estática (Fallback/Inicial)
 export const TABLES_METADATA: TableMetadata[] = [
   // --- AUTOMÓVEL ---
-  { id: 't_auto_L', name: 'Automóvel Plano Light (75%)', category: 'AUTO', plan: 'LIGHT', taxaAdmin: 0.20, fundoReserva: 0.03, seguroPct: 0.00084, maxLanceEmbutido: 0.25 },
-  { id: 't_auto_normal', name: 'Automóvel Plano Normal', category: 'AUTO', plan: 'NORMAL', taxaAdmin: 0.19, fundoReserva: 0.03, seguroPct: 0.00084, maxLanceEmbutido: 0.25 },
-  { id: 't_auto_SL', name: 'Automóvel Plano Super Light (50%)', category: 'AUTO', plan: 'SUPERLIGHT', taxaAdmin: 0.22, fundoReserva: 0.03, seguroPct: 0.00084, maxLanceEmbutido: 0.25 },
-  { id: 't_auto5121_107_L', name: 'Automóvel Grupo 5121 Plano Light (75%)', category: 'AUTO', plan: 'LIGHT', taxaAdmin: 0.20, fundoReserva: 0.03, seguroPct: 0.00084, maxLanceEmbutido: 0.25 },
-  { id: 't_auto5121_107_normal', name: 'Automóvel Grupo 5121 Plano Normal', category: 'AUTO', plan: 'NORMAL', taxaAdmin: 0.19, fundoReserva: 0.03, seguroPct: 0.00084, maxLanceEmbutido: 0.25 },
+  { id: 't_auto_L', name: 'Automóvel (75%)', category: 'AUTO', plan: 'LIGHT', taxaAdmin: 0.20, fundoReserva: 0.03, seguroPct: 0.00084, maxLanceEmbutido: 0.25 },
+  { id: 't_auto_normal', name: 'Automóvel Normal', category: 'AUTO', plan: 'NORMAL', taxaAdmin: 0.19, fundoReserva: 0.03, seguroPct: 0.00084, maxLanceEmbutido: 0.25 },
+  { id: 't_auto_SL', name: 'Automóvel (50%)', category: 'AUTO', plan: 'SUPERLIGHT', taxaAdmin: 0.22, fundoReserva: 0.03, seguroPct: 0.00084, maxLanceEmbutido: 0.25 },
+  { id: 't_auto5121_107_L', name: 'Automóvel Grupo 5121 (75%)', category: 'AUTO', plan: 'LIGHT', taxaAdmin: 0.20, fundoReserva: 0.03, seguroPct: 0.00084, maxLanceEmbutido: 0.25 },
+  { id: 't_auto5121_107_normal', name: 'Automóvel Grupo 5121 Normal', category: 'AUTO', plan: 'NORMAL', taxaAdmin: 0.19, fundoReserva: 0.03, seguroPct: 0.00084, maxLanceEmbutido: 0.25 },
 
   // --- IMÓVEL ---
-  { id: 't_imovel_normal', name: 'Imóvel Plano Normal', category: 'IMOVEL', plan: 'NORMAL', taxaAdmin: 0.22, fundoReserva: 0.03, seguroPct: 0.00059, maxLanceEmbutido: 0.30 },
-  { id: 't_imovel2011_202_L', name: 'Imóvel Grupo 2011 Plano Light (75%)', category: 'IMOVEL', plan: 'LIGHT', taxaAdmin: 0.25, fundoReserva: 0.03, seguroPct: 0.00059, maxLanceEmbutido: 0.30 },
-  { id: 't_imovel2011_202_normal', name: 'Imóvel Grp 2011 Normal', category: 'IMOVEL', plan: 'NORMAL', taxaAdmin: 0.25, fundoReserva: 0.03, seguroPct: 0.00059, maxLanceEmbutido: 0.30 },
-  { id: 't_imovel2011_202_SL', name: 'Imóvel Grp 2011 Super Light', category: 'IMOVEL', plan: 'SUPERLIGHT', taxaAdmin: 0.25, fundoReserva: 0.03, seguroPct: 0.00059, maxLanceEmbutido: 0.30 },
+  { id: 't_imovel_normal', name: 'Imóvel Normal', category: 'IMOVEL', plan: 'NORMAL', taxaAdmin: 0.22, fundoReserva: 0.03, seguroPct: 0.00059, maxLanceEmbutido: 0.30 },
+  { id: 't_imovel2011_202_L', name: 'Imóvel Grupo 2011 (75%)', category: 'IMOVEL', plan: 'LIGHT', taxaAdmin: 0.25, fundoReserva: 0.03, seguroPct: 0.00059, maxLanceEmbutido: 0.30 },
+  { id: 't_imovel2011_202_normal', name: 'Imóvel Grupo 2011 Normal', category: 'IMOVEL', plan: 'NORMAL', taxaAdmin: 0.25, fundoReserva: 0.03, seguroPct: 0.00059, maxLanceEmbutido: 0.30 },
+  { id: 't_imovel2011_202_SL', name: 'Imóvel Grupo 2011 (50%)', category: 'IMOVEL', plan: 'SUPERLIGHT', taxaAdmin: 0.25, fundoReserva: 0.03, seguroPct: 0.00059, maxLanceEmbutido: 0.30 },
 
   // --- MOTO ---
-  { id: 't_moto_normal', name: 'Moto Plano Normal', category: 'MOTO', plan: 'NORMAL', taxaAdmin: 0.19, fundoReserva: 0.03, seguroPct: 0.00084, maxLanceEmbutido: 0.0 },
+  { id: 't_moto_normal', name: 'Motocicleta Normal', category: 'MOTO', plan: 'NORMAL', taxaAdmin: 0.19, fundoReserva: 0.03, seguroPct: 0.00084, maxLanceEmbutido: 0.0 },
   
   // --- SERVIÇOS ---
-  { id: 't_servicos_normal', name: 'Serviços Plano Normal', category: 'SERVICOS', plan: 'NORMAL', taxaAdmin: 0.20, fundoReserva: 0.03, seguroPct: 0.00084, maxLanceEmbutido: 0.0 },
+  { id: 't_servicos_normal', name: 'Serviços Normal', category: 'SERVICOS', plan: 'NORMAL', taxaAdmin: 0.20, fundoReserva: 0.03, seguroPct: 0.00084, maxLanceEmbutido: 0.0 },
 ];
 
 // 3. Dados Expandidos (Mock DB Inicial Completo)
