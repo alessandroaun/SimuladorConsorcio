@@ -16,6 +16,7 @@
     "clsx": "^2.1.1",
     "csv-parse": "^6.1.0",
     "expo": "~54.0.25",
+    "expo-file-system": "~19.0.19",
     "expo-print": "~15.0.7",
     "expo-sharing": "~14.0.7",
     "expo-status-bar": "~3.0.8",

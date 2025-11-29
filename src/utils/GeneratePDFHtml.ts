@@ -2,6 +2,7 @@ import { SimulationResult, SimulationInput, ContemplationScenario } from './Cons
 
 // --- IMAGENS ---
 const LOGO_IMG = "https://intranet.consorciorecon.com.br/media/photo/logo_4Y8K7jg.PNG"; 
+const WATERMARK_IMG = "https://intranet.consorciorecon.com.br/media/photo/logo_4Y8K7jg.PNG";
 
 export const generateHTML = (
   result: SimulationResult, 
@@ -53,16 +54,37 @@ export const generateHTML = (
   }
 
   // --- CÁLCULOS FINAIS ---
-  const custoTotal = mode === 'REDUZIDO' && result.custoTotalReduzido
-    ? result.custoTotalReduzido
-    : (mode === 'CHEIO' && result.custoTotalCheio ? result.custoTotalCheio : result.custoTotal);
+  
+  // Definição de Fatores para cálculo do custo (recuperando lógica do plano)
+  const isSpecialPlan = result.plano === 'LIGHT' || result.plano === 'SUPERLIGHT';
+  const fatorPlano = result.plano === 'LIGHT' ? 0.75 : result.plano === 'SUPERLIGHT' ? 0.50 : 1.0;
+
+  // Variáveis auxiliares para a fórmula
+  const totalSeguroNoPrazo = result.seguroMensal * input.prazo;
+  const lanceEmbutidoValor = result.lanceTotal - input.lanceBolso - result.lanceCartaVal;
+  
+  // Se for crédito reduzido, calcula o valor que foi abatido do crédito base
+  const valorReducaoCreditoBase = (isSpecialPlan && mode === 'REDUZIDO') 
+    ? (result.creditoOriginal * (1 - fatorPlano)) 
+    : 0;
+
+  // FÓRMULA CORRIGIDA: Crédito + Taxas - Lances Embutidos - Carta - Redução
+  const custoTotal = 
+      result.creditoOriginal + 
+      result.taxaAdminValor + 
+      result.fundoReservaValor + 
+      totalSeguroNoPrazo + 
+      result.valorAdesao - 
+      lanceEmbutidoValor - 
+      result.lanceCartaVal - 
+      valorReducaoCreditoBase;
 
   const primeiraParcelaValor = result.totalPrimeiraParcela;
   
   // Cálculo da porcentagem do seguro para exibição
   const seguroPercentual = result.creditoOriginal > 0 ? (result.seguroMensal / result.creditoOriginal) : 0;
   
-  // Cálculo do Total da Composição Financeira
+  // Cálculo do Total da Composição Financeira (Display do quadro de composição)
   // Soma: Taxa Adm + FR + Seguro Total (Mensal * Prazo) + Adesão
   const totalSeguroVida = result.seguroMensal > 0 ? (result.seguroMensal * input.prazo) : 0;
   const totalComposicao = result.taxaAdminValor + result.fundoReservaValor + totalSeguroVida + result.valorAdesao;
