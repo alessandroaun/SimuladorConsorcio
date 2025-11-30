@@ -729,7 +729,7 @@ export default function ResultScreen({ route, navigation }: Props) {
       >
         <SafeAreaView style={{flex: 1, backgroundColor: '#0F172A'}}>
            <View style={styles.powerBiHeader}>
-              <Text style={styles.powerBiTitle}>Análise de Mercado</Text>
+              <Text style={styles.powerBiTitle}>Relação de Grupos</Text>
               <TouchableOpacity onPress={() => setShowPowerBi(false)} style={styles.closePowerBiBtn}>
                  <X color="#fff" size={24} />
               </TouchableOpacity>
@@ -744,7 +744,7 @@ export default function ResultScreen({ route, navigation }: Props) {
                 renderLoading={() => (
                     <View style={styles.loadingContainer}>
                         <ActivityIndicator size="large" color="#0F172A" />
-                        <Text style={styles.loadingText}>Carregando Tabela...</Text>
+                        <Text style={styles.loadingText}>Carregando Relação de Grupos...</Text>
                     </View>
                 )}
                 // Configurações para melhorar a experiência
