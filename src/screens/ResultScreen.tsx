@@ -1,31 +1,45 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert, 
-  Platform, StatusBar, Modal, TextInput, KeyboardAvoidingView, Dimensions
+  Platform, StatusBar, Modal, TextInput, KeyboardAvoidingView, Dimensions, ActivityIndicator
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context'; 
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { 
   ArrowLeft, Share2, CheckCircle2, Car, CalendarClock, AlertTriangle, 
   Ban, DollarSign, Calendar, FileText, Info, RefreshCw, TrendingDown,
-  User, Phone, Briefcase, X, FileOutput, Wallet, PieChart, ChevronRight
+  User, Phone, Briefcase, X, FileOutput, Wallet, PieChart, ChevronRight,
+  BarChart3, Globe, Users
 } from 'lucide-react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 
-// CORREÇÃO: Importando da API legacy para evitar erro de depreciação do moveAsync
-// @ts-ignore: Ignora erro de tipagem caso o módulo legacy não tenha definições explícitas
-import * as FileSystem from 'expo-file-system/legacy';
+// Importação do WebView para exibir o PowerBI
+import { WebView } from 'react-native-webview';
+
+// CORREÇÃO: Importação padrão. O código já protege o uso na web com 'if (Platform.OS === 'web')'
+import * as FileSystem from 'expo-file-system';
 
 import { RootStackParamList } from '../types/navigation';
 import { ContemplationScenario } from '../utils/ConsortiumCalculator';
 import { generateHTML } from '../utils/GeneratePDFHtml';
+import { TABLES_METADATA } from '../../data/TableRepository';
+
+// REMOVIDO: Importação local
+// import GROUPS_DATA from '../data/json/groups_data.json';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Result'>;
 
 type ScenarioMode = 'REDUZIDO' | 'CHEIO';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
+
+// URL do PowerBI fornecido
+const POWERBI_URL = "https://app.powerbi.com/view?r=eyJrIjoiNmJlOTI0ZTYtY2UwNi00NmZmLWE1NzQtNjUwNjUxZTk3Nzg0IiwidCI6ImFkMjI2N2U3LWI4ZTctNDM4Ni05NmFmLTcxZGVhZGQwODY3YiJ9";
+
+// URL para o JSON de Grupos (Hospedado externamente)
+// Usamos o CDN do JSDelivr para garantir performance e contornar cache agressivo
+const GROUPS_DATA_URL = "https://cdn.jsdelivr.net/gh/alessandroaun/SimuladorConsorcio@master/src/data/json/groups_data.json";
 
 export default function ResultScreen({ route, navigation }: Props) {
   // Pega quotaCount se vier, senão assume 1
@@ -40,19 +54,96 @@ export default function ResultScreen({ route, navigation }: Props) {
   // Estados para o Modal de PDF
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [pdfClient, setPdfClient] = useState('');
-  const [pdfClientPhone, setPdfClientPhone] = useState(''); // Telefone do Cliente
-  const [pdfSeller, setPdfSeller] = useState(''); // Nome Vendedor
-  const [pdfSellerPhone, setPdfSellerPhone] = useState(''); // NOVO: Telefone Vendedor
+  const [pdfClientPhone, setPdfClientPhone] = useState(''); 
+  const [pdfSeller, setPdfSeller] = useState(''); 
+  const [pdfSellerPhone, setPdfSellerPhone] = useState(''); 
+
+  // Estado para o Modal do PowerBI
+  const [showPowerBi, setShowPowerBi] = useState(false);
+
+  // Estados para Grupos Online
+  const [groupsData, setGroupsData] = useState<any[]>([]);
+  const [isLoadingGroups, setIsLoadingGroups] = useState(true);
 
   const isSpecialPlan = result.plano === 'LIGHT' || result.plano === 'SUPERLIGHT';
   const fatorPlano = result.plano === 'LIGHT' ? 0.75 : result.plano === 'SUPERLIGHT' ? 0.50 : 1.0;
+
+  // BUSCA OS DADOS DOS GRUPOS NA INTERNET
+  useEffect(() => {
+    const fetchGroups = async () => {
+      try {
+        // Adiciona timestamp para evitar cache stale (igual ao DataService)
+        const url = `${GROUPS_DATA_URL}?t=${new Date().getTime()}`;
+        console.log("Buscando grupos em:", url);
+        
+        const response = await fetch(url);
+        if (response.ok) {
+          const data = await response.json();
+          setGroupsData(data);
+        } else {
+          console.warn("Falha ao baixar grupos:", response.status);
+        }
+      } catch (error) {
+        console.error("Erro ao buscar grupos:", error);
+      } finally {
+        setIsLoadingGroups(false);
+      }
+    };
+
+    fetchGroups();
+  }, []);
+
+  // Lógica para filtrar Grupos Compatíveis
+  const compatibleGroups = useMemo(() => {
+    // Se ainda está carregando ou não tem dados, retorna vazio
+    if (isLoadingGroups || groupsData.length === 0) return [];
+
+    // 1. Identificar a categoria da simulação atual
+    const currentTable = TABLES_METADATA.find(t => t.id === input.tableId);
+    if (!currentTable) return [];
+
+    // Mapeamento atualizado: AUTO e MOTO viram "VEÍCULO"
+    const categoryMap: Record<string, string> = {
+      'AUTO': 'VEÍCULO',
+      'MOTO': 'VEÍCULO',
+      'IMOVEL': 'IMÓVEL',
+      'SERVICOS': 'SERVIÇO'
+    };
+
+    const targetType = categoryMap[currentTable.category];
+
+    return groupsData.filter((group: any) => {
+      // Filtro 1: Tipo/Categoria
+      if (group.TIPO !== targetType) return false;
+
+      // Filtro 2: Prazo (O prazo da simulação deve ser menor ou igual ao máximo do grupo)
+      if (input.prazo > group["Prazo Máximo"]) return false;
+
+      // Filtro 3: Faixa de Crédito
+      const rangeString = group["Créditos Disponíveis"];
+      if (!rangeString) return false;
+
+      const rangeParts = rangeString.replace(/\./g, '').split(' até ');
+      if (rangeParts.length !== 2) return false;
+      
+      const minCredit = parseFloat(rangeParts[0]);
+      const maxCredit = parseFloat(rangeParts[1]);
+
+      // Compara com o crédito original de UMA cota (limite do grupo é por cota)
+      if (result.creditoOriginal < minCredit || result.creditoOriginal > maxCredit) return false;
+
+      return true;
+    }).map((g: any) => g.Grupo); // Retorna apenas os números dos grupos
+  }, [input.tableId, input.prazo, result.creditoOriginal, groupsData, isLoadingGroups]);
 
   const handleOpenPdfModal = () => {
     setShowPdfModal(true);
   }
 
   const handleGeneratePDF = async () => {
+    // Fecha o modal antes de processar para evitar UI travada
     setShowPdfModal(false);
+
     try {
       const html = generateHTML(
         result, 
@@ -67,33 +158,39 @@ export default function ResultScreen({ route, navigation }: Props) {
         quotaCount
       );
       
-      // Gera o PDF (salvo inicialmente num diretório temporário/cache interno)
+      // --- LÓGICA ESPECÍFICA PARA WEB (CORRIGIDA) ---
+      if (Platform.OS === 'web') {
+          const printWindow = window.open('', '_blank');
+          if (printWindow) {
+            printWindow.document.write(html);
+            printWindow.document.close();
+            printWindow.focus();
+            setTimeout(() => {
+                printWindow.print();
+            }, 500);
+          } else {
+             Alert.alert("Atenção", "Por favor, permita pop-ups para gerar o PDF.");
+          }
+          return; 
+      }
+
+      // --- LÓGICA PARA ANDROID / IOS (NATIVA) ---
       const { uri } = await Print.printToFileAsync({ 
         html,
         base64: false 
       });
       
-      // Define o novo nome do arquivo
       const nomeClienteLimpo = pdfClient 
         ? pdfClient.replace(/[^a-zA-Z0-9]/g, '_') 
         : 'Cliente';
       
-      // Calcula e formata o valor total do crédito para o nome do arquivo
       const valorTotalCredito = result.creditoOriginal * quotaCount;
       const valorFormatado = valorTotalCredito.toLocaleString('pt-BR', { minimumFractionDigits: 0 });
-      
-      // Nome do arquivo atualizado conforme solicitado: Simulação_Cliente_Valor.pdf
-      // (Usamos "Simulacao" sem acento para garantir compatibilidade entre sistemas)
       const fileName = `Simulacao_${nomeClienteLimpo}_R$${valorFormatado}.pdf`;
       
-      // Casting para 'any' para garantir compatibilidade
       const fs = FileSystem as any;
-      
-      // Tenta obter um diretório válido
       let targetDirectory = fs.documentDirectory || fs.cacheDirectory;
 
-      // Fallback: Se os diretórios do sistema forem nulos (comum em web ou configs específicas),
-      // extraímos o caminho base do próprio arquivo gerado.
       if (!targetDirectory && uri) {
         const lastSlashIndex = uri.lastIndexOf('/');
         if (lastSlashIndex !== -1) {
@@ -101,9 +198,8 @@ export default function ResultScreen({ route, navigation }: Props) {
         }
       }
 
-      let finalUri = uri; // Por padrão, usa a URI original
+      let finalUri = uri; 
 
-      // Só tentamos renomear/mover se tivermos um diretório de destino válido
       if (targetDirectory) {
         try {
             const newUri = targetDirectory + fileName;
@@ -111,23 +207,17 @@ export default function ResultScreen({ route, navigation }: Props) {
                 from: uri,
                 to: newUri
             });
-            finalUri = newUri; // Atualiza para o novo caminho com o nome correto
+            finalUri = newUri; 
         } catch (moveError) {
             console.warn("Não foi possível renomear o arquivo, compartilhando com nome original.", moveError);
-            // Em caso de erro ao mover (permissão, etc), mantém o finalUri como o original
         }
       }
 
-      // Compartilha o arquivo (seja o renomeado ou o original)
-      if (Platform.OS === "ios" || Platform.OS === "android") {
-          await Sharing.shareAsync(finalUri, { 
-            UTI: '.pdf', 
-            mimeType: 'application/pdf',
-            dialogTitle: `Compartilhar Simulação - ${pdfClient}`
-          });
-      } else {
-          Alert.alert("Sucesso", "PDF gerado.");
-      }
+      await Sharing.shareAsync(finalUri, { 
+        UTI: '.pdf', 
+        mimeType: 'application/pdf',
+        dialogTitle: `Compartilhar Simulação - ${pdfClient}`
+      });
 
     } catch (error) {
       console.error(error);
@@ -142,7 +232,6 @@ export default function ResultScreen({ route, navigation }: Props) {
   let creditoExibido: number;
   let isReajustado = false;
 
-  // Lógica de exibição do Crédito (Reduzido vs Cheio)
   if (isSpecialPlan && result.cenarioCreditoTotal) { 
       if (mode === 'REDUZIDO' && isCaminho1Viable && result.cenarioCreditoReduzido) {
           activeScenario = result.cenarioCreditoReduzido;
@@ -168,9 +257,6 @@ export default function ResultScreen({ route, navigation }: Props) {
   const reducaoValor = safeCenario?.reducaoValor ?? 0;
   const reducaoPorcentagem = safeCenario?.reducaoPorcentagem ?? 0;
 
-  // --- CÁLCULO ATUALIZADO DO CUSTO TOTAL ---
-  // Fórmula: Crédito Total + Taxa Adm + Fundo Reserva + (Seguro * Prazo) + Adesão - Embutido - Carta - (Diferença Reduzido se aplicável)
-  
   const totalSeguroNoPrazo = result.seguroMensal * input.prazo;
   const valorReducaoCreditoBase = (isSpecialPlan && mode === 'REDUZIDO') 
     ? (result.creditoOriginal * (1 - fatorPlano)) 
@@ -200,16 +286,28 @@ export default function ResultScreen({ route, navigation }: Props) {
           <ArrowLeft color="#1E293B" size={22} />
         </TouchableOpacity>
         
-        <Text style={styles.headerTitle}>Resultado da Simulação</Text>
+        <Text style={styles.headerTitle}>Resultado</Text>
         
-        <TouchableOpacity 
-          onPress={handleOpenPdfModal} 
-          style={styles.actionButton}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <Share2 color="#fff" size={18} />
-          <Text style={styles.actionButtonText}>PDF</Text>
-        </TouchableOpacity>
+        <View style={{flexDirection: 'row', gap: 8}}>
+            {/* BOTÃO POWER BI */}
+            <TouchableOpacity 
+              onPress={() => setShowPowerBi(true)} 
+              style={[styles.actionButton, {backgroundColor: '#F59E0B'}]}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <BarChart3 color="#fff" size={18} />
+            </TouchableOpacity>
+
+            {/* BOTÃO PDF */}
+            <TouchableOpacity 
+              onPress={handleOpenPdfModal} 
+              style={styles.actionButton}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Share2 color="#fff" size={18} />
+              <Text style={styles.actionButtonText}>PDF</Text>
+            </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -219,7 +317,7 @@ export default function ResultScreen({ route, navigation }: Props) {
             <View style={styles.heroCard}>
                 <View style={styles.heroTopRow}>
                     <View>
-                        <Text style={styles.heroLabel}>PARCELA INICIAL</Text>
+                        <Text style={styles.heroLabel}>1ª PARCELA + ADESÃO</Text>
                         <Text style={styles.heroValue}>{formatBRL(result.totalPrimeiraParcela)}</Text>
                     </View>
                     <View style={styles.planBadge}>
@@ -242,12 +340,11 @@ export default function ResultScreen({ route, navigation }: Props) {
                     )}
                 </View>
             </View>
-            {/* Efeito de sombra/camadas */}
             <View style={styles.heroCardLayer1} />
             <View style={styles.heroCardLayer2} />
         </View>
 
-        {/* --- SELETOR DE CAMINHO (SWITCH MODERNO) --- */}
+        {/* --- SELETOR DE CAMINHO --- */}
         {isSpecialPlan && (
             <View style={styles.sectionContainer}>
                 <View style={styles.sectionHeader}>
@@ -303,7 +400,7 @@ export default function ResultScreen({ route, navigation }: Props) {
             </View>
         )}
 
-        {/* --- CARDS DE MÉTRICAS (GRID REFORMULADO) --- */}
+        {/* --- CARDS DE MÉTRICAS --- */}
         <View style={styles.gridContainer}>
           <View style={styles.gridCard}>
             <View style={styles.gridHeader}>
@@ -313,7 +410,7 @@ export default function ResultScreen({ route, navigation }: Props) {
             </View>
             <View style={styles.gridContent}>
                 <Text style={styles.gridLabel} numberOfLines={1} adjustsFontSizeToFit>
-                    {isSpecialPlan ? `Crédito Base` : 'Crédito Simulado'}
+                    {isSpecialPlan ? `Crédito Base` : 'Crédito Contratado'}
                 </Text>
                 <Text style={styles.gridValue} numberOfLines={1} adjustsFontSizeToFit>
                     {formatBRL(mode === 'REDUZIDO' && isSpecialPlan ? result.creditoOriginal * fatorPlano : result.creditoOriginal)}
@@ -334,7 +431,7 @@ export default function ResultScreen({ route, navigation }: Props) {
           </View>
         </View>
 
-        {/* --- ANÁLISE DE LANCES (ELEGANT DESIGN) --- */}
+        {/* --- ANÁLISE DE LANCES --- */}
         {result.lanceTotal > 0 && (
           <View style={styles.contentCard}>
             <View style={styles.cardHeaderRow}>
@@ -382,12 +479,12 @@ export default function ResultScreen({ route, navigation }: Props) {
                 <View style={styles.dashDivider} />
 
                 <View style={styles.totalLanceRow}>
-                    <Text style={styles.totalLanceLabel}>Lance Total</Text>
+                    <Text style={styles.totalLanceLabel}>Total Ofertado</Text>
                     <Text style={styles.totalLanceValue}>{formatBRL(result.lanceTotal)}</Text>
                 </View>
             </View>
 
-            {/* CRÉDITO LÍQUIDO - FEATURED BOX */}
+            {/* CRÉDITO LÍQUIDO */}
             <View style={styles.featuredBox}>
                 <Text style={styles.featuredValue}>{formatBRL(creditoExibido)}</Text>
                 <Text style={styles.featuredLabel}>CRÉDITO LÍQUIDO</Text>
@@ -398,15 +495,14 @@ export default function ResultScreen({ route, navigation }: Props) {
              {result.lanceCartaVal > 0 && (
                 <View style={styles.infoFooter}>
                     <Text style={styles.infoFooterText}>
-                        Deverá comprar um bem de:   <Text style={{fontWeight: '700', color: '#0F172A'}}>{formatBRL(creditoExibido + result.lanceCartaVal)}</Text>
-
+                        Poder de Compra Total: <Text style={{fontWeight: '700', color: '#0F172A'}}>{formatBRL(creditoExibido + result.lanceCartaVal)}</Text>
                     </Text>
                 </View>
             )}
           </View>
         )}
 
-        {/* --- DETALHAMENTO FINANCEIRO (CLEAN LIST) --- */}
+        {/* --- DETALHAMENTO FINANCEIRO --- */}
         <View style={styles.contentCard}>
             <View style={styles.cardHeaderRow}>
                 <Text style={styles.cardTitle}>Custos e Taxas</Text>
@@ -442,6 +538,33 @@ export default function ResultScreen({ route, navigation }: Props) {
             </View>
         </View>
 
+        {/* --- NOVO CARD: GRUPOS COMPATÍVEIS --- */}
+        <View style={styles.contentCard}>
+            <View style={styles.cardHeaderRow}>
+                <Text style={styles.cardTitle}>Grupos Compatíveis</Text>
+                <Users color="#94A3B8" size={18} />
+            </View>
+            
+            {isLoadingGroups ? (
+              <View style={{ padding: 20, alignItems: 'center' }}>
+                <ActivityIndicator size="small" color="#334155" />
+                <Text style={{ marginTop: 8, color: '#64748B', fontSize: 12 }}>Buscando grupos atualizados...</Text>
+              </View>
+            ) : (
+              <View style={styles.badgesContainer}>
+                 {compatibleGroups.length > 0 ? (
+                   compatibleGroups.map((grupo) => (
+                      <View key={grupo} style={styles.groupBadge}>
+                          <Text style={styles.groupBadgeText}>{grupo}</Text>
+                      </View>
+                   ))
+                 ) : (
+                   <Text style={styles.noGroupsText}>Nenhum grupo encontrado com estes parâmetros.</Text>
+                 )}
+              </View>
+            )}
+        </View>
+
         {/* --- PREVISÃO PÓS-CONTEMPLAÇÃO --- */}
         {cenarioPrincipal && (
             <View style={styles.contentCard}>
@@ -462,7 +585,6 @@ export default function ResultScreen({ route, navigation }: Props) {
                     </View>
                 )}
                 
-                {/* BIG NUMBERS */}
                 {result.lanceTotal > 0 && (
                     <View style={styles.bigNumbersContainer}>
                         <View style={styles.bigNumberItem}>
@@ -485,7 +607,6 @@ export default function ResultScreen({ route, navigation }: Props) {
                     </View>
                 )}
                 
-                {/* TABELA ELEGANTE */}
                 <View style={styles.modernTable}>
                     <View style={styles.tableHead}>
                         <Text style={[styles.th, {flex: 0.8}]}>Mês</Text>
@@ -508,7 +629,6 @@ export default function ResultScreen({ route, navigation }: Props) {
             </View>
         )}
 
-        {/* BOTÃO NOVA SIMULAÇÃO */}
         <TouchableOpacity 
             style={styles.resetButton} 
             onPress={() => navigation.popToTop()}
@@ -600,6 +720,42 @@ export default function ResultScreen({ route, navigation }: Props) {
           </KeyboardAvoidingView>
       </Modal>
 
+      {/* --- MODAL DO POWER BI (NOVO) --- */}
+      <Modal
+        visible={showPowerBi}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowPowerBi(false)}
+      >
+        <SafeAreaView style={{flex: 1, backgroundColor: '#0F172A'}}>
+           <View style={styles.powerBiHeader}>
+              <Text style={styles.powerBiTitle}>Análise de Mercado</Text>
+              <TouchableOpacity onPress={() => setShowPowerBi(false)} style={styles.closePowerBiBtn}>
+                 <X color="#fff" size={24} />
+              </TouchableOpacity>
+           </View>
+           
+           {/* WEBVIEW INTERATIVO */}
+           <View style={{flex: 1, backgroundColor: '#fff'}}>
+              <WebView 
+                source={{ uri: POWERBI_URL }}
+                style={{ flex: 1 }}
+                startInLoadingState
+                renderLoading={() => (
+                    <View style={styles.loadingContainer}>
+                        <ActivityIndicator size="large" color="#0F172A" />
+                        <Text style={styles.loadingText}>Carregando Tabela...</Text>
+                    </View>
+                )}
+                // Configurações para melhorar a experiência
+                javaScriptEnabled={true}
+                domStorageEnabled={true}
+                scalesPageToFit={true}
+              />
+           </View>
+        </SafeAreaView>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -666,14 +822,13 @@ const styles = StyleSheet.create({
   errorBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF2F2', padding: 12, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: '#FECACA' },
   errorText: { color: '#B91C1C', fontSize: 12, fontWeight: '600', marginLeft: 8, flex: 1 },
 
-  // GRID CARDS - REFORMULADO
+  // GRID CARDS
   gridContainer: { flexDirection: 'row', gap: 16, marginBottom: 24 },
   gridCard: { 
       flex: 1, 
       backgroundColor: '#FFFFFF', 
       borderRadius: 20, 
       padding: 16, 
-      // Mudança para coluna para comportar texto maior
       flexDirection: 'column', 
       alignItems: 'flex-start',
       justifyContent: 'space-between',
@@ -693,7 +848,7 @@ const styles = StyleSheet.create({
   gridLabel: { fontSize: 12, color: '#64748B', fontWeight: '600', textTransform: 'uppercase', marginBottom: 4 },
   gridValue: { fontSize: 18, fontWeight: '800', color: '#0F172A' },
 
-  // CONTENT CARD (GENERIC)
+  // CONTENT CARD
   contentCard: { 
       backgroundColor: '#FFFFFF', borderRadius: 24, padding: 20, marginBottom: 24,
       shadowColor: '#64748B', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.08, shadowRadius: 24, elevation: 4 
@@ -716,7 +871,7 @@ const styles = StyleSheet.create({
   totalLanceLabel: { fontSize: 15, fontWeight: '700', color: '#1E293B' },
   totalLanceValue: { fontSize: 16, fontWeight: '800', color: '#16A34A' },
 
-  // FEATURED BOX (NET CREDIT)
+  // FEATURED BOX
   featuredBox: { 
       backgroundColor: '#1E293B', borderRadius: 16, padding: 24, alignItems: 'center', justifyContent: 'center',
       marginTop: 8, shadowColor: '#1E293B', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.2, shadowRadius: 12, elevation: 6
@@ -771,5 +926,41 @@ const styles = StyleSheet.create({
   modalInput: { flex: 1, marginLeft: 12, fontSize: 15, color: '#1E293B', fontWeight: '500' },
   
   generateButton: { backgroundColor: '#0F172A', borderRadius: 14, height: 56, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 8 },
-  generateButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700', letterSpacing: 0.5 }
+  generateButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700', letterSpacing: 0.5 },
+
+  // ESTILOS DO POWER BI
+  powerBiHeader: {
+    height: 60,
+    backgroundColor: '#0F172A',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#334155'
+  },
+  powerBiTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  closePowerBiBtn: { padding: 8 },
+  loadingContainer: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 999
+  },
+  loadingText: { marginTop: 12, color: '#64748B', fontSize: 14, fontWeight: '600' },
+
+  // BADGES DE GRUPOS
+  badgesContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  groupBadge: {
+    backgroundColor: '#0F172A', // Cor escura para destaque
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#334155'
+  },
+  groupBadgeText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+  noGroupsText: { color: '#64748B', fontSize: 13, fontStyle: 'italic', marginTop: 4 },
+
 });

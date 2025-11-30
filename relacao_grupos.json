@@ -1,0 +1,122 @@
+[
+  {
+    "Grupo": 2009,
+    "TIPO": "IMÓVEL",
+    "Prazo Máximo": 140,
+    "Créditos Disponíveis": "80.000 até 100.000"
+  },
+  {
+    "Grupo": 2010,
+    "TIPO": "IMÓVEL",
+    "Prazo Máximo": 200,
+    "Créditos Disponíveis": "140.000 até 250.000"
+  },
+  {
+    "Grupo": 2011,
+    "TIPO": "IMÓVEL",
+    "Prazo Máximo": 202,
+    "Créditos Disponíveis": "200.000 até 300.000"
+  },
+  {
+    "Grupo": 3202,
+    "TIPO": "VEÍCULO",
+    "Prazo Máximo": 25,
+    "Créditos Disponíveis": "16.000 até 20.000"
+  },
+  {
+    "Grupo": 3203,
+    "TIPO": "VEÍCULO",
+    "Prazo Máximo": 60,
+    "Créditos Disponíveis": "13.000 até 20.000"
+  },
+  {
+    "Grupo": 4100,
+    "TIPO": "SERVIÇO",
+    "Prazo Máximo": 25,
+    "Créditos Disponíveis": "13.000 até 20.000"
+  },
+  {
+    "Grupo": 5108,
+    "TIPO": "VEÍCULO",
+    "Prazo Máximo": 25,
+    "Créditos Disponíveis": "25.000 até 30.000"
+  },
+  {
+    "Grupo": 5109,
+    "TIPO": "VEÍCULO",
+    "Prazo Máximo": 25,
+    "Créditos Disponíveis": "45.000 até 60.000"
+  },
+  {
+    "Grupo": 5110,
+    "TIPO": "VEÍCULO",
+    "Prazo Máximo": 36,
+    "Créditos Disponíveis": "45.000 até 60.000"
+  },
+  {
+    "Grupo": 5111,
+    "TIPO": "VEÍCULO",
+    "Prazo Máximo": 36,
+    "Créditos Disponíveis": "25.000 até 30.000"
+  },
+  {
+    "Grupo": 5113,
+    "TIPO": "VEÍCULO",
+    "Prazo Máximo": 50,
+    "Créditos Disponíveis": "50.000 até 130.000"
+  },
+  {
+    "Grupo": 5114,
+    "TIPO": "VEÍCULO",
+    "Prazo Máximo": 50,
+    "Créditos Disponíveis": "50.000 até 80.000"
+  },
+  {
+    "Grupo": 5115,
+    "TIPO": "VEÍCULO",
+    "Prazo Máximo": 60,
+    "Créditos Disponíveis": "25.000 até 40.000"
+  },
+  {
+    "Grupo": 5116,
+    "TIPO": "VEÍCULO",
+    "Prazo Máximo": 72,
+    "Créditos Disponíveis": "25.000 até 40.000"
+  },
+  {
+    "Grupo": 5118,
+    "TIPO": "VEÍCULO",
+    "Prazo Máximo": 80,
+    "Créditos Disponíveis": "35.000 até 55.000"
+  },
+  {
+    "Grupo": 5119,
+    "TIPO": "VEÍCULO",
+    "Prazo Máximo": 80,
+    "Créditos Disponíveis": "16.000 até 30.000"
+  },
+  {
+    "Grupo": 5120,
+    "TIPO": "VEÍCULO",
+    "Prazo Máximo": 100,
+    "Créditos Disponíveis": "55.000 até 100.000"
+  },
+  {
+    "Grupo": 5121,
+    "TIPO": "VEÍCULO",
+    "Prazo Máximo": 107,
+    "Créditos Disponíveis": "80.000 até 110.000"
+  },
+  {
+    "Grupo": 5112,
+    "TIPO": "VEÍCULO",
+    "Prazo Máximo": 50,
+    "Créditos Disponíveis": "45.000 até 100.000"
+  },
+  {
+    "Grupo": 5117,
+    "TIPO": "VEÍCULO",
+    "Prazo Máximo": 80,
+    "Créditos Disponíveis": "60.000 até 100.000"
+  }
+]
