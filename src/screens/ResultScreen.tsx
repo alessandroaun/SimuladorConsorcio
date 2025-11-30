@@ -39,7 +39,7 @@ const POWERBI_URL = "https://app.powerbi.com/view?r=eyJrIjoiNmJlOTI0ZTYtY2UwNi00
 
 // URL para o JSON de Grupos (Hospedado externamente)
 // Usamos o CDN do JSDelivr para garantir performance e contornar cache agressivo
-const GROUPS_DATA_URL = "https://cdn.jsdelivr.net/gh/alessandroaun/SimuladorConsorcio@master/src/data/json/groups_data.json";
+const GROUPS_DATA_URL = "https://cdn.jsdelivr.net/gh/alessandroaun/SimuladorConsorcio@master/relacao_grupos.json";
 
 export default function ResultScreen({ route, navigation }: Props) {
   // Pega quotaCount se vier, senão assume 1
