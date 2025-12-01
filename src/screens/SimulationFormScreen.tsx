@@ -681,7 +681,7 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
                         />
                         <View style={styles.quickTags}>
                              <Text style={styles.quickLabel}>Sugestões:</Text>
-                            {[0, 0.20, 0.25, 0.30].filter(p => p <= table.maxLanceEmbutido || p === 0).map(pct => (
+                            {[0, 0.15, 0.25, 0.30].filter(p => p <= table.maxLanceEmbutido || p === 0).map(pct => (
                                 <TouchableOpacity key={pct} style={styles.tag} onPress={() => handleQuickLanceSelect(pct)}>
                                     <Text style={styles.tagText}>{(pct*100).toFixed(0)}%</Text>
                                 </TouchableOpacity>

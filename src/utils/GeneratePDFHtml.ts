@@ -151,7 +151,7 @@ export const generateHTML = (
             }
             
             .logo {
-                height: 70px; /* Levemente reduzido */
+                height: 85px; /* Levemente reduzido */
                 width: auto;
                 margin-bottom: 10px;
             }
