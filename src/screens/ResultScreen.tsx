@@ -39,8 +39,12 @@ const POWERBI_URL = "https://app.powerbi.com/view?r=eyJrIjoiNmJlOTI0ZTYtY2UwNi00
 const GROUPS_DATA_URL = "https://cdn.jsdelivr.net/gh/alessandroaun/SimuladorConsorcio@master/relacao_grupos.json";
 
 export default function ResultScreen({ route, navigation }: Props) {
-  // Pega quotaCount se vier, senão assume 1
+  // Pega quotaCount se vier, senão assume 1. selectedCredits é pego via cast para any pois pode não estar tipado no navigation.ts ainda
   const { result, input, quotaCount = 1 } = route.params;
+  
+  // Tenta recuperar selectedCredits do params ou do input (caso tenha sido passado lá)
+  const paramsAny = route.params as any;
+  const selectedCredits = paramsAny.selectedCredits || (input as any).selectedCredits as number[] | undefined;
   
   const isCaminho1Viable = result.cenarioCreditoReduzido !== null;
   const [mode, setMode] = useState<ScenarioMode>(isCaminho1Viable ? 'REDUZIDO' : 'CHEIO');
@@ -88,10 +92,9 @@ export default function ResultScreen({ route, navigation }: Props) {
     fetchGroups();
   }, []);
 
-  const compatibleGroups = useMemo(() => {
-    if (isLoadingGroups || groupsData.length === 0) return [];
-
-    if (!currentTable) return [];
+  // --- NOVA LÓGICA DE GRUPOS COMPATÍVEIS ---
+  const compatibleGroupsMap = useMemo(() => {
+    if (isLoadingGroups || groupsData.length === 0 || !currentTable) return [];
 
     const categoryMap: Record<string, string> = {
       'AUTO': 'VEÍCULO',
@@ -102,48 +105,67 @@ export default function ResultScreen({ route, navigation }: Props) {
 
     const targetType = categoryMap[currentTable.category];
 
-    // LÓGICA DE CRÉDITO INDIVIDUAL (CORRIGIDA ANTERIORMENTE)
-    const creditoIndividualParaBusca = quotaCount > 1 
-      ? result.creditoOriginal / quotaCount 
-      : result.creditoOriginal;
+    // 1. Define quais créditos devem ser analisados individualmente
+    let creditsToAnalyze: number[] = [];
 
-    return groupsData.filter((group: any) => {
-      // 1. Filtro de Tipo e Prazo Máximo Básico
-      if (group.TIPO !== targetType) return false;
-      if (input.prazo > group["Prazo Máximo"]) return false;
+    // Se existir o array de créditos selecionados (vindo da tela anterior), usa ele.
+    if (selectedCredits && Array.isArray(selectedCredits) && selectedCredits.length > 0) {
+        creditsToAnalyze = selectedCredits;
+    } else {
+        // Fallback: se não tiver array explícito, calcula o individual baseando-se no total e quantidade
+        const individualCredit = quotaCount > 1 ? result.creditoOriginal / quotaCount : result.creditoOriginal;
+        creditsToAnalyze = [individualCredit];
+    }
 
-      // 2. Filtro de Intervalo de Crédito
-      const rangeString = group["Créditos Disponíveis"];
-      if (!rangeString) return false;
+    // Filtra valores únicos para não repetir cards iguais e ordena decrescente
+    const uniqueCredits = [...new Set(creditsToAnalyze)].sort((a, b) => b - a);
 
-      const rangeParts = rangeString.replace(/\./g, '').split(' até ');
-      if (rangeParts.length !== 2) return false;
-      
-      const minCredit = parseFloat(rangeParts[0]);
-      const maxCredit = parseFloat(rangeParts[1]);
+    // 2. Mapeia cada crédito para seus grupos compatíveis
+    return uniqueCredits.map(creditVal => {
+        const groups = groupsData.filter((group: any) => {
+             // 1. Filtro de Tipo e Prazo Máximo Básico
+             if (group.TIPO !== targetType) return false;
+             if (input.prazo > group["Prazo Máximo"]) return false;
 
-      if (creditoIndividualParaBusca < minCredit || creditoIndividualParaBusca > maxCredit) return false;
+             // 2. Filtro de Intervalo de Crédito
+             const rangeString = group["Créditos Disponíveis"];
+             if (!rangeString) return false;
 
-      // 3. REGRAS DE NEGÓCIO ESPECÍFICAS
-      const groupName = String(group.Grupo);
+             const rangeParts = rangeString.replace(/\./g, '').split(' até ');
+             if (rangeParts.length !== 2) return false;
+             
+             const minCredit = parseFloat(rangeParts[0]);
+             const maxCredit = parseFloat(rangeParts[1]);
 
-      // Regra para Grupo 2011 (Imóvel Longo Prazo)
-      if (groupName === '2011') {
-        if (input.prazo <= 200 || creditoIndividualParaBusca < 200000) {
-            return false;
-        }
-      }
+             if (creditVal < minCredit || creditVal > maxCredit) return false;
 
-      // Regra para Grupo 5121
-      if (groupName === '5121') {
-         if (input.prazo <= 100 || creditoIndividualParaBusca < 80000) {
-             return false;
-         }
-      }
+             // 3. REGRAS DE NEGÓCIO ESPECÍFICAS
+             const groupName = String(group.Grupo);
 
-      return true;
-    }).map((g: any) => g.Grupo);
-  }, [input.tableId, input.prazo, result.creditoOriginal, groupsData, isLoadingGroups, quotaCount, currentTable]);
+             // Regra para Grupo 2011 (Imóvel Longo Prazo)
+             if (groupName === '2011') {
+                if (input.prazo <= 200 || creditVal < 200000) {
+                    return false;
+                }
+             }
+
+             // Regra para Grupo 5121
+             if (groupName === '5121') {
+                 if (input.prazo <= 100 || creditVal < 80000) {
+                     return false;
+                 }
+             }
+
+             return true;
+        }).map((g: any) => g.Grupo);
+
+        return {
+            creditValue: creditVal,
+            groups: groups
+        };
+    });
+
+  }, [input.tableId, input.prazo, result.creditoOriginal, groupsData, isLoadingGroups, quotaCount, currentTable, selectedCredits]);
 
   const handleOpenPdfModal = () => {
     setShowPdfModal(true);
@@ -178,7 +200,7 @@ export default function ResultScreen({ route, navigation }: Props) {
                 printWindow.print();
             }, 500);
           } else {
-             Alert.alert("Atenção", "Por favor, permita pop-ups para gerar o PDF.");
+              Alert.alert("Atenção", "Por favor, permita pop-ups para gerar o PDF.");
           }
           return; 
       }
@@ -325,7 +347,7 @@ export default function ResultScreen({ route, navigation }: Props) {
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
               <Share2 color="#fff" size={18} />
-              <Text style={styles.actionButtonText}>PDF</Text>
+              <Text style={styles.actionButtonText}>ENVIAR SIMULAÇÃO</Text>
             </TouchableOpacity>
         </View>
       </View>
@@ -565,32 +587,51 @@ export default function ResultScreen({ route, navigation }: Props) {
             </View>
         </View>
 
-        {/* GRUPOS COMPATÍVEIS */}
-        <View style={styles.contentCard}>
-            <View style={styles.cardHeaderRow}>
-                <Text style={styles.cardTitle}>Grupos Compatíveis</Text>
-                <Users color="#94A3B8" size={18} />
+        {/* GRUPOS COMPATÍVEIS (DINÂMICO PARA MÚLTIPLOS CRÉDITOS) */}
+        {isLoadingGroups ? (
+            <View style={[styles.contentCard, { padding: 30, alignItems: 'center' }]}>
+               <ActivityIndicator size="small" color="#334155" />
+               <Text style={{ marginTop: 12, color: '#64748B', fontSize: 13 }}>Buscando grupos atualizados...</Text>
             </View>
-            
-            {isLoadingGroups ? (
-              <View style={{ padding: 20, alignItems: 'center' }}>
-                <ActivityIndicator size="small" color="#334155" />
-                <Text style={{ marginTop: 8, color: '#64748B', fontSize: 12 }}>Buscando grupos atualizados...</Text>
-              </View>
-            ) : (
-              <View style={styles.badgesContainer}>
-                 {compatibleGroups.length > 0 ? (
-                   compatibleGroups.map((grupo) => (
-                      <View key={grupo} style={styles.groupBadge}>
-                          <Text style={styles.groupBadgeText}>{grupo}</Text>
-                      </View>
-                   ))
-                 ) : (
-                   <Text style={styles.noGroupsText}>Nenhum grupo encontrado com estes parâmetros.</Text>
-                 )}
-              </View>
-            )}
-        </View>
+        ) : (
+            <>
+                {compatibleGroupsMap.length > 0 ? (
+                    compatibleGroupsMap.map((item, index) => (
+                        <View key={index} style={styles.contentCard}>
+                            <View style={[styles.cardHeaderRow, { alignItems: 'flex-start' }]}>
+                                <View>
+                                    <Text style={styles.cardTitle}>Grupos Compatíveis</Text>
+                                    <Text style={[styles.cardSubtitle, { marginTop: 4, color: '#1E293B', fontWeight: '600' }]}>
+                                        Crédito de {formatBRL(item.creditValue)}
+                                    </Text>
+                                </View>
+                                <Users color="#94A3B8" size={18} style={{ marginTop: 4 }} />
+                            </View>
+                            
+                            <View style={styles.badgesContainer}>
+                                {item.groups.length > 0 ? (
+                                    item.groups.map((grupo: string) => (
+                                        <View key={grupo} style={styles.groupBadge}>
+                                            <Text style={styles.groupBadgeText}>{grupo}</Text>
+                                        </View>
+                                    ))
+                                ) : (
+                                    <Text style={styles.noGroupsText}>Nenhum grupo encontrado para este valor específico.</Text>
+                                )}
+                            </View>
+                        </View>
+                    ))
+                ) : (
+                    <View style={styles.contentCard}>
+                        <View style={styles.cardHeaderRow}>
+                            <Text style={styles.cardTitle}>Grupos Compatíveis</Text>
+                            <Users color="#94A3B8" size={18} />
+                        </View>
+                        <Text style={styles.noGroupsText}>Nenhum grupo encontrado com estes parâmetros.</Text>
+                    </View>
+                )}
+            </>
+        )}
 
         {/* PREVISÃO PÓS-CONTEMPLAÇÃO */}
         {cenarioPrincipal && (
@@ -621,7 +662,7 @@ export default function ResultScreen({ route, navigation }: Props) {
                                 <View style={styles.trendBadge}>
                                     <TrendingDown size={10} color="#15803D" />
                                     <Text style={styles.trendText}>
-                                        -{formatBRL(reducaoValor)} ({reducaoPorcentagem.toFixed(1)}%)
+                                         -{formatBRL(reducaoValor)} ({reducaoPorcentagem.toFixed(1)}%)
                                     </Text>
                                 </View>
                             )}
@@ -715,7 +756,7 @@ export default function ResultScreen({ route, navigation }: Props) {
 
                       <Text style={styles.modalSectionTitle}>Dados do Vendedor</Text>
                       <View style={styles.formGroup}>
-                           <View style={styles.inputContainer}>
+                            <View style={styles.inputContainer}>
                               <Briefcase size={18} color="#94A3B8" />
                               <TextInput 
                                   style={styles.modalInput} 
@@ -976,7 +1017,7 @@ const styles = StyleSheet.create({
   loadingText: { marginTop: 12, color: '#64748B', fontSize: 14, fontWeight: '600' },
 
   // BADGES DE GRUPOS
-  badgesContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  badgesContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
   groupBadge: {
     backgroundColor: '#0F172A', // Cor escura para destaque
     paddingHorizontal: 12,

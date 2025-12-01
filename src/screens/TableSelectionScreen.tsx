@@ -45,7 +45,7 @@ export default function TableSelectionScreen({ route, navigation }: Props) {
           style={styles.backBtn}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
-          <ArrowLeft color="#0F172A" size={24} />
+          <ArrowLeft color="#0F172A" size={30} />
         </TouchableOpacity>
         
         <View style={styles.headerContent}>
@@ -130,13 +130,14 @@ const styles = StyleSheet.create({
   },
   backBtn: { 
     alignSelf: 'flex-start',
-    marginBottom: 20,
-    padding: 4,
+    padding: 1,
+    paddingVertical: 30,
   },
   headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 16,
+    marginTop: -24,
   },
   iconBubble: {
     width: 48,

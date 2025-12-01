@@ -58,7 +58,7 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
   const [editingIndex, setEditingIndex] = useState<number>(0); 
   
   const [lanceEmbInput, setLanceEmbInput] = useState(''); 
-  const [lanceBolso, setLanceBolso] = useState('');       
+  const [lanceBolso, setLanceBolso] = useState('');        
   const [lanceCartaInput, setLanceCartaInput] = useState(''); 
   
   // Inicializando com valores seguros
@@ -360,7 +360,13 @@ export default function SimulationFormScreen({ route, navigation }: Props) {
     const result = ConsortiumCalculator.calculate(input, table, currentParcelaValue);
     const quotaCount = credits.filter(c => parseFloat(c) > 0).length;
 
-    navigation.navigate('Result', { result, input, quotaCount });
+    // --- CORREÇÃO: Enviando o array de créditos individuais ---
+    const selectedCredits = credits
+      .map(c => parseFloat(c))
+      .filter(c => !isNaN(c) && c > 0);
+
+    // Casting para 'any' para evitar erro de tipo caso o RootStackParamList não tenha sido atualizado ainda
+    navigation.navigate('Result', { result, input, quotaCount, selectedCredits } as any);
   };
 
   const formatCurrency = (val: number) => val.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'});

@@ -93,9 +93,41 @@ export const generateHTML = (
   const pctTaxaAdmin = result.creditoOriginal > 0 ? (result.taxaAdminValor / result.creditoOriginal) : 0;
   const pctFundoReserva = result.creditoOriginal > 0 ? (result.fundoReservaValor / result.creditoOriginal) : 0;
 
-  // Porcentagens de alocação do lance
-  const pctAlocacaoParcela = input.percentualLanceParaParcela || 0;
-  const pctAlocacaoPrazo = 100 - pctAlocacaoParcela;
+  // --- LÓGICA DE CORREÇÃO DA DESTINAÇÃO DO LANCE (TRAVA 40%) ---
+  // Recalcula as porcentagens reais baseado na regra de negócio do Calculator
+  let realPctAlocacaoParcela = input.percentualLanceParaParcela || 0;
+  
+  // Proteção para garantir que temos valores válidos
+  if (result.lanceTotal > 0) {
+    const mesContemplacao = Math.max(1, input.mesContemplacao || 1);
+    const prazoRestante = Math.max(1, input.prazo - mesContemplacao);
+    
+    // Calcula o teto financeiro de redução (40% da parcela pré-contemplação)
+    const tetoReducaoMensal = result.parcelaPreContemplacao * 0.40;
+    
+    // Quanto o usuário QUERIA destinar (em dinheiro)
+    const valorDesejadoParaParcela = result.lanceTotal * (realPctAlocacaoParcela / 100);
+    
+    // Quanto isso daria de redução mensal
+    const reducaoMensalCalculada = valorDesejadoParaParcela / prazoRestante;
+
+    // Se a redução calculada superar o teto de 40%
+    if (reducaoMensalCalculada > tetoReducaoMensal) {
+        // O valor efetivo usado para parcela é limitado pelo teto * prazo restante
+        const valorMaximoPermitidoParaParcela = tetoReducaoMensal * prazoRestante;
+        
+        // Recalcula a porcentagem baseada no dinheiro que REALMENTE foi usado para parcela
+        realPctAlocacaoParcela = (valorMaximoPermitidoParaParcela / result.lanceTotal) * 100;
+        
+        // Garante que não ultrapasse 100% por arredondamento
+        if (realPctAlocacaoParcela > 100) realPctAlocacaoParcela = 100;
+    }
+  }
+
+  // Define a alocação do prazo com o que sobrou
+  const realPctAlocacaoPrazo = 100 - realPctAlocacaoParcela;
+
+  // --- FIM DA LÓGICA CORRIGIDA ---
 
   // Gerar linhas da tabela com design limpo e ARREDONDAMENTO do prazo
   const tableRows = activeScenario.map((scenario, index) => {
@@ -491,15 +523,15 @@ export const generateHTML = (
                 <div style="margin-top: 10px;">
                     <div style="font-size: 9px; color: #64748b; margin-bottom: 2px;">
                         Destinação do Lance: 
-                        <strong>${pctAlocacaoPrazo.toFixed(0)}% para Redução de Prazo</strong> | 
-                        <strong>${pctAlocacaoParcela.toFixed(0)}% para Redução de Parcela</strong>
+                        <strong>${realPctAlocacaoPrazo.toFixed(0)}% para Redução de Prazo</strong> | 
+                        <strong>${realPctAlocacaoParcela.toFixed(0)}% para Redução de Parcela</strong>
                     </div>
                     <div class="allocation-bar-container">
-                        <div class="alloc-segment" style="width: ${pctAlocacaoPrazo}%; background-color: #059669;">
-                           ${pctAlocacaoPrazo > 15 ? 'PRAZO' : ''}
+                        <div class="alloc-segment" style="width: ${realPctAlocacaoPrazo}%; background-color: #059669;">
+                           ${realPctAlocacaoPrazo > 15 ? 'PRAZO' : ''}
                         </div>
-                        <div class="alloc-segment" style="width: ${pctAlocacaoParcela}%; background-color: #2563EB;">
-                           ${pctAlocacaoParcela > 15 ? 'PARCELA' : ''}
+                        <div class="alloc-segment" style="width: ${realPctAlocacaoParcela}%; background-color: #2563EB;">
+                           ${realPctAlocacaoParcela > 15 ? 'PARCELA' : ''}
                         </div>
                     </div>
                 </div>
