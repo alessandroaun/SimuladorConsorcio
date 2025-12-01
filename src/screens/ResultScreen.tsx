@@ -13,20 +13,18 @@ import {
 } from 'lucide-react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-
-// Importação do WebView para exibir o PowerBI
 import { WebView } from 'react-native-webview';
 
-// CORREÇÃO: Importação padrão. O código já protege o uso na web com 'if (Platform.OS === 'web')'
-import * as FileSystem from 'expo-file-system';
+// CORREÇÃO CRÍTICA PARA EXPO 52+:
+// Usamos a API legacy para ter acesso ao 'moveAsync' e 'cacheDirectory' sem erros.
+// O @ts-ignore suprime o erro de que o módulo pode não ter tipos definidos.
+// @ts-ignore
+import * as FileSystem from 'expo-file-system/legacy';
 
 import { RootStackParamList } from '../types/navigation';
 import { ContemplationScenario } from '../utils/ConsortiumCalculator';
 import { generateHTML } from '../utils/GeneratePDFHtml';
 import { TABLES_METADATA } from '../../data/TableRepository';
-
-// REMOVIDO: Importação local
-// import GROUPS_DATA from '../data/json/groups_data.json';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Result'>;
 
@@ -37,19 +35,18 @@ const { width, height } = Dimensions.get('window');
 // URL do PowerBI fornecido
 const POWERBI_URL = "https://app.powerbi.com/view?r=eyJrIjoiNmJlOTI0ZTYtY2UwNi00NmZmLWE1NzQtNjUwNjUxZTk3Nzg0IiwidCI6ImFkMjI2N2U3LWI4ZTctNDM4Ni05NmFmLTcxZGVhZGQwODY3YiJ9";
 
-// URL para o JSON de Grupos (Hospedado externamente)
-// Usamos o CDN do JSDelivr para garantir performance e contornar cache agressivo
+// URL para o JSON de Grupos
 const GROUPS_DATA_URL = "https://cdn.jsdelivr.net/gh/alessandroaun/SimuladorConsorcio@master/relacao_grupos.json";
 
 export default function ResultScreen({ route, navigation }: Props) {
   // Pega quotaCount se vier, senão assume 1
   const { result, input, quotaCount = 1 } = route.params;
   
-  // Verifica se o Caminho 1 é viável (não é null)
   const isCaminho1Viable = result.cenarioCreditoReduzido !== null;
-
-  // Estado para controlar qual caminho o usuário está vendo
   const [mode, setMode] = useState<ScenarioMode>(isCaminho1Viable ? 'REDUZIDO' : 'CHEIO');
+
+  // Recupera os dados da tabela para exibir as porcentagens
+  const currentTable = TABLES_METADATA.find(t => t.id === input.tableId);
 
   // Estados para o Modal de PDF
   const [showPdfModal, setShowPdfModal] = useState(false);
@@ -68,11 +65,9 @@ export default function ResultScreen({ route, navigation }: Props) {
   const isSpecialPlan = result.plano === 'LIGHT' || result.plano === 'SUPERLIGHT';
   const fatorPlano = result.plano === 'LIGHT' ? 0.75 : result.plano === 'SUPERLIGHT' ? 0.50 : 1.0;
 
-  // BUSCA OS DADOS DOS GRUPOS NA INTERNET
   useEffect(() => {
     const fetchGroups = async () => {
       try {
-        // Adiciona timestamp para evitar cache stale (igual ao DataService)
         const url = `${GROUPS_DATA_URL}?t=${new Date().getTime()}`;
         console.log("Buscando grupos em:", url);
         
@@ -93,16 +88,11 @@ export default function ResultScreen({ route, navigation }: Props) {
     fetchGroups();
   }, []);
 
-  // Lógica para filtrar Grupos Compatíveis
   const compatibleGroups = useMemo(() => {
-    // Se ainda está carregando ou não tem dados, retorna vazio
     if (isLoadingGroups || groupsData.length === 0) return [];
 
-    // 1. Identificar a categoria da simulação atual
-    const currentTable = TABLES_METADATA.find(t => t.id === input.tableId);
     if (!currentTable) return [];
 
-    // Mapeamento atualizado: AUTO e MOTO viram "VEÍCULO"
     const categoryMap: Record<string, string> = {
       'AUTO': 'VEÍCULO',
       'MOTO': 'VEÍCULO',
@@ -112,14 +102,17 @@ export default function ResultScreen({ route, navigation }: Props) {
 
     const targetType = categoryMap[currentTable.category];
 
-    return groupsData.filter((group: any) => {
-      // Filtro 1: Tipo/Categoria
-      if (group.TIPO !== targetType) return false;
+    // LÓGICA DE CRÉDITO INDIVIDUAL (CORRIGIDA ANTERIORMENTE)
+    const creditoIndividualParaBusca = quotaCount > 1 
+      ? result.creditoOriginal / quotaCount 
+      : result.creditoOriginal;
 
-      // Filtro 2: Prazo (O prazo da simulação deve ser menor ou igual ao máximo do grupo)
+    return groupsData.filter((group: any) => {
+      // 1. Filtro de Tipo e Prazo Máximo Básico
+      if (group.TIPO !== targetType) return false;
       if (input.prazo > group["Prazo Máximo"]) return false;
 
-      // Filtro 3: Faixa de Crédito
+      // 2. Filtro de Intervalo de Crédito
       const rangeString = group["Créditos Disponíveis"];
       if (!rangeString) return false;
 
@@ -129,19 +122,35 @@ export default function ResultScreen({ route, navigation }: Props) {
       const minCredit = parseFloat(rangeParts[0]);
       const maxCredit = parseFloat(rangeParts[1]);
 
-      // Compara com o crédito original de UMA cota (limite do grupo é por cota)
-      if (result.creditoOriginal < minCredit || result.creditoOriginal > maxCredit) return false;
+      if (creditoIndividualParaBusca < minCredit || creditoIndividualParaBusca > maxCredit) return false;
+
+      // 3. REGRAS DE NEGÓCIO ESPECÍFICAS
+      const groupName = String(group.Grupo);
+
+      // Regra para Grupo 2011 (Imóvel Longo Prazo)
+      if (groupName === '2011') {
+        if (input.prazo <= 200 || creditoIndividualParaBusca < 200000) {
+            return false;
+        }
+      }
+
+      // Regra para Grupo 5121
+      if (groupName === '5121') {
+         if (input.prazo <= 100 || creditoIndividualParaBusca < 80000) {
+             return false;
+         }
+      }
 
       return true;
-    }).map((g: any) => g.Grupo); // Retorna apenas os números dos grupos
-  }, [input.tableId, input.prazo, result.creditoOriginal, groupsData, isLoadingGroups]);
+    }).map((g: any) => g.Grupo);
+  }, [input.tableId, input.prazo, result.creditoOriginal, groupsData, isLoadingGroups, quotaCount, currentTable]);
 
   const handleOpenPdfModal = () => {
     setShowPdfModal(true);
   }
 
+  // --- FUNÇÃO DE GERAR PDF COM RENOMEAÇÃO (USANDO LEGACY IMPORT) ---
   const handleGeneratePDF = async () => {
-    // Fecha o modal antes de processar para evitar UI travada
     setShowPdfModal(false);
 
     try {
@@ -158,7 +167,7 @@ export default function ResultScreen({ route, navigation }: Props) {
         quotaCount
       );
       
-      // --- LÓGICA ESPECÍFICA PARA WEB (CORRIGIDA) ---
+      // Tratamento para Web
       if (Platform.OS === 'web') {
           const printWindow = window.open('', '_blank');
           if (printWindow) {
@@ -174,21 +183,25 @@ export default function ResultScreen({ route, navigation }: Props) {
           return; 
       }
 
-      // --- LÓGICA PARA ANDROID / IOS (NATIVA) ---
+      // 1. Gera o PDF
       const { uri } = await Print.printToFileAsync({ 
         html,
         base64: false 
       });
       
+      // 2. Define o novo nome do arquivo
       const nomeClienteLimpo = pdfClient 
-        ? pdfClient.replace(/[^a-zA-Z0-9]/g, '_') 
+        ? pdfClient.trim().replace(/[^a-zA-Z0-9À-ÿ]/g, '_') 
         : 'Cliente';
       
-      const valorTotalCredito = result.creditoOriginal * quotaCount;
+      const valorTotalCredito = quotaCount > 1 ? result.creditoOriginal : (result.creditoOriginal * quotaCount);
       const valorFormatado = valorTotalCredito.toLocaleString('pt-BR', { minimumFractionDigits: 0 });
+
       const fileName = `Simulacao_${nomeClienteLimpo}_R$${valorFormatado}.pdf`;
       
-      const fs = FileSystem as any;
+      // 3. Usa o FileSystem Legacy
+      const fs = FileSystem;
+      
       let targetDirectory = fs.documentDirectory || fs.cacheDirectory;
 
       if (!targetDirectory && uri) {
@@ -202,22 +215,29 @@ export default function ResultScreen({ route, navigation }: Props) {
 
       if (targetDirectory) {
         try {
-            const newUri = targetDirectory + fileName;
+            const dirPath = targetDirectory.endsWith('/') ? targetDirectory : targetDirectory + '/';
+            const newUri = dirPath + fileName;
+            
             await fs.moveAsync({
                 from: uri,
                 to: newUri
             });
-            finalUri = newUri; 
+            finalUri = newUri;
         } catch (moveError) {
-            console.warn("Não foi possível renomear o arquivo, compartilhando com nome original.", moveError);
+            console.warn("Erro ao renomear arquivo (fallback para original):", moveError);
         }
       }
 
-      await Sharing.shareAsync(finalUri, { 
-        UTI: '.pdf', 
-        mimeType: 'application/pdf',
-        dialogTitle: `Compartilhar Simulação - ${pdfClient}`
-      });
+      // 4. Compartilha o arquivo
+      if (Platform.OS === "ios" || Platform.OS === "android") {
+          await Sharing.shareAsync(finalUri, { 
+            UTI: '.pdf', 
+            mimeType: 'application/pdf',
+            dialogTitle: `Compartilhar Simulação - ${pdfClient}`
+          });
+      } else {
+          Alert.alert("Sucesso", "PDF gerado.");
+      }
 
     } catch (error) {
       console.error(error);
@@ -276,7 +296,7 @@ export default function ResultScreen({ route, navigation }: Props) {
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
       
-      {/* CABEÇALHO MODERNO */}
+      {/* CABEÇALHO */}
       <View style={styles.header}>
         <TouchableOpacity 
           onPress={() => navigation.goBack()} 
@@ -312,12 +332,12 @@ export default function ResultScreen({ route, navigation }: Props) {
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         
-        {/* --- HERO CARD PREMIUM --- */}
+        {/* HERO CARD */}
         <View style={styles.heroContainer}>
             <View style={styles.heroCard}>
                 <View style={styles.heroTopRow}>
                     <View>
-                        <Text style={styles.heroLabel}>1ª PARCELA + ADESÃO</Text>
+                        <Text style={styles.heroLabel}>PARCELA INICIAL</Text>
                         <Text style={styles.heroValue}>{formatBRL(result.totalPrimeiraParcela)}</Text>
                     </View>
                     <View style={styles.planBadge}>
@@ -344,7 +364,7 @@ export default function ResultScreen({ route, navigation }: Props) {
             <View style={styles.heroCardLayer2} />
         </View>
 
-        {/* --- SELETOR DE CAMINHO --- */}
+        {/* SELETOR DE CAMINHO */}
         {isSpecialPlan && (
             <View style={styles.sectionContainer}>
                 <View style={styles.sectionHeader}>
@@ -400,7 +420,7 @@ export default function ResultScreen({ route, navigation }: Props) {
             </View>
         )}
 
-        {/* --- CARDS DE MÉTRICAS --- */}
+        {/* CARDS DE MÉTRICAS */}
         <View style={styles.gridContainer}>
           <View style={styles.gridCard}>
             <View style={styles.gridHeader}>
@@ -410,7 +430,7 @@ export default function ResultScreen({ route, navigation }: Props) {
             </View>
             <View style={styles.gridContent}>
                 <Text style={styles.gridLabel} numberOfLines={1} adjustsFontSizeToFit>
-                    {isSpecialPlan ? `Crédito Base` : 'Crédito Contratado'}
+                    {isSpecialPlan ? `Crédito Base` : 'Crédito SIMULADO'}
                 </Text>
                 <Text style={styles.gridValue} numberOfLines={1} adjustsFontSizeToFit>
                     {formatBRL(mode === 'REDUZIDO' && isSpecialPlan ? result.creditoOriginal * fatorPlano : result.creditoOriginal)}
@@ -431,7 +451,7 @@ export default function ResultScreen({ route, navigation }: Props) {
           </View>
         </View>
 
-        {/* --- ANÁLISE DE LANCES --- */}
+        {/* ANÁLISE DE LANCES */}
         {result.lanceTotal > 0 && (
           <View style={styles.contentCard}>
             <View style={styles.cardHeaderRow}>
@@ -491,7 +511,6 @@ export default function ResultScreen({ route, navigation }: Props) {
                 <Text style={styles.featuredSub}>Disponível para compra do bem</Text>
             </View>
 
-            {/* PODER DE COMPRA */}
              {result.lanceCartaVal > 0 && (
                 <View style={styles.infoFooter}>
                     <Text style={styles.infoFooterText}>
@@ -502,7 +521,7 @@ export default function ResultScreen({ route, navigation }: Props) {
           </View>
         )}
 
-        {/* --- DETALHAMENTO FINANCEIRO --- */}
+        {/* DETALHAMENTO FINANCEIRO */}
         <View style={styles.contentCard}>
             <View style={styles.cardHeaderRow}>
                 <Text style={styles.cardTitle}>Custos e Taxas</Text>
@@ -511,22 +530,30 @@ export default function ResultScreen({ route, navigation }: Props) {
 
             <View style={styles.costList}>
                 <View style={styles.costItem}>
-                    <Text style={styles.costLabel}>Taxa Adm. Total</Text>
+                    <Text style={styles.costLabel}>
+                        Taxa Adm. Total ({currentTable ? (currentTable.taxaAdmin * 100).toFixed(0) : 0}%)
+                    </Text>
                     <View style={styles.costDots} />
                     <Text style={styles.costValue}>{formatBRL(result.taxaAdminValor)}</Text>
                 </View>
                 <View style={styles.costItem}>
-                    <Text style={styles.costLabel}>Fundo Reserva</Text>
+                    <Text style={styles.costLabel}>
+                        Fundo Reserva ({currentTable ? (currentTable.fundoReserva * 100).toFixed(0) : 0}%)
+                    </Text>
                     <View style={styles.costDots} />
                     <Text style={styles.costValue}>{formatBRL(result.fundoReservaValor)}</Text>
                 </View>
                 <View style={styles.costItem}>
-                    <Text style={styles.costLabel}>Seguro Mensal (Total)</Text>
+                    <Text style={styles.costLabel}>
+                        Seguro Mensal ({currentTable ? (currentTable.seguroPct * 100).toFixed(3).replace('.', ',') : '0,0000'}% a.m)
+                    </Text>
                     <View style={styles.costDots} />
                     <Text style={styles.costValue}>{formatBRL(totalSeguroNoPrazo)}</Text>
                 </View>
                 <View style={styles.costItem}>
-                    <Text style={styles.costLabel}>Taxa de Adesão</Text>
+                    <Text style={styles.costLabel}>
+                        Taxa de Adesão ({input.taxaAdesaoPct ? (input.taxaAdesaoPct * 100).toFixed(1).replace('.0', '') : 0}%)
+                    </Text>
                     <View style={styles.costDots} />
                     <Text style={styles.costValue}>{formatBRL(result.valorAdesao)}</Text>
                 </View>
@@ -538,7 +565,7 @@ export default function ResultScreen({ route, navigation }: Props) {
             </View>
         </View>
 
-        {/* --- NOVO CARD: GRUPOS COMPATÍVEIS --- */}
+        {/* GRUPOS COMPATÍVEIS */}
         <View style={styles.contentCard}>
             <View style={styles.cardHeaderRow}>
                 <Text style={styles.cardTitle}>Grupos Compatíveis</Text>
@@ -565,7 +592,7 @@ export default function ResultScreen({ route, navigation }: Props) {
             )}
         </View>
 
-        {/* --- PREVISÃO PÓS-CONTEMPLAÇÃO --- */}
+        {/* PREVISÃO PÓS-CONTEMPLAÇÃO */}
         {cenarioPrincipal && (
             <View style={styles.contentCard}>
                 <View style={styles.cardHeaderRow}>
@@ -641,7 +668,7 @@ export default function ResultScreen({ route, navigation }: Props) {
 
       </ScrollView>
 
-      {/* --- MODAL DE DADOS PARA PDF --- */}
+      {/* MODAL DE DADOS PARA PDF */}
       <Modal 
         visible={showPdfModal} 
         animationType="fade" 
@@ -720,7 +747,7 @@ export default function ResultScreen({ route, navigation }: Props) {
           </KeyboardAvoidingView>
       </Modal>
 
-      {/* --- MODAL DO POWER BI (NOVO) --- */}
+      {/* MODAL DO POWER BI */}
       <Modal
         visible={showPowerBi}
         animationType="slide"
@@ -735,7 +762,6 @@ export default function ResultScreen({ route, navigation }: Props) {
               </TouchableOpacity>
            </View>
            
-           {/* WEBVIEW INTERATIVO */}
            <View style={{flex: 1, backgroundColor: '#fff'}}>
               <WebView 
                 source={{ uri: POWERBI_URL }}
@@ -747,7 +773,6 @@ export default function ResultScreen({ route, navigation }: Props) {
                         <Text style={styles.loadingText}>Carregando Relação de Grupos...</Text>
                     </View>
                 )}
-                // Configurações para melhorar a experiência
                 javaScriptEnabled={true}
                 domStorageEnabled={true}
                 scalesPageToFit={true}

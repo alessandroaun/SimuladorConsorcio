@@ -129,9 +129,9 @@ export class ConsortiumCalculator {
                 // A diferença volta para o bolo do prazo
                 const valorUsado = reducaoEfetiva * prazoRestante;
                 sobraPorTeto = Math.max(0, valorLanceParaParcela - valorUsado);
-                info = "Limitado 40% (Sobra p/ Prazo)";
+                info = "Redução no Valor da Parcela Limitado 40% da parcela atual (Excedente está descontando no Prazo)";
             } else {
-                info = pctDestinoParcela > 0 ? "Redução Aplicada" : "Somente Prazo";
+                info = pctDestinoParcela > 0 ? "Redução no Valor de Parcela Aplicada" : "Redução no Prazo Restante Aplicada";
             }
 
             // Aplica redução na parcela

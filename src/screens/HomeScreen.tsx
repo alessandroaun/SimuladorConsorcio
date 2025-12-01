@@ -1,7 +1,14 @@
-import React, { useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, StatusBar, ScrollView, Dimensions, Image } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { 
+  View, Text, TouchableOpacity, StyleSheet, SafeAreaView, 
+  StatusBar, ScrollView, Dimensions, Image, Modal, ActivityIndicator 
+} from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Car, Home as HomeIcon, Bike, Wrench, ChevronRight, LayoutGrid } from 'lucide-react-native';
+import { 
+  Car, Home as HomeIcon, Bike, Wrench, ChevronRight, 
+  LayoutGrid, BarChart3, X 
+} from 'lucide-react-native';
+import { WebView } from 'react-native-webview'; // Importando WebView
 import { RootStackParamList } from '../types/navigation';
 
 import { Category, TableMetadata } from '../../data/TableRepository'; 
@@ -25,7 +32,13 @@ const PADDING_HORIZONTAL = 24;
 const GAP = 12;
 const CARD_WIDTH = (width - (PADDING_HORIZONTAL * 2) - GAP) / 2;
 
+// URL do PowerBI
+const POWERBI_URL = "https://app.powerbi.com/view?r=eyJrIjoiNmJlOTI0ZTYtY2UwNi00NmZmLWE1NzQtNjUwNjUxZTk3Nzg0IiwidCI6ImFkMjI2N2U3LWI4ZTctNDM4Ni05NmFmLTcxZGVhZGQwODY3YiJ9";
+
 export default function HomeScreen({ navigation, route }: Props) {
+  // Estado para o Modal do PowerBI
+  const [showPowerBi, setShowPowerBi] = useState(false);
+
   // Configuração visual das categorias com paleta moderna
   const baseCategories: BaseCategory[] = [
     { 
@@ -99,13 +112,29 @@ export default function HomeScreen({ navigation, route }: Props) {
         {/* CABEÇALHO MODERNO */}
         <View style={styles.header}>
           
-          <Text style={styles.title}>
-            O que você deseja{'\n'}
-            <Text style={styles.titleHighlight}>simular hoje?</Text>
-          </Text>
+          <View style={styles.headerTopRow}>
+              <View style={{flex: 1}}>
+                  <Text style={styles.title}>
+                    O que você deseja{'\n'}
+                    <Text style={styles.titleHighlight}>simular hoje?</Text>
+                  </Text>
+              </View>
+
+              {/* BOTÃO POWER BI (DISCRETO) */}
+              <TouchableOpacity 
+                style={styles.powerBiMiniButton} 
+                onPress={() => setShowPowerBi(true)}
+                activeOpacity={0.7}
+              >
+                 <BarChart3 color="#D97706" size={14} />
+                 <Text style={styles.powerBiMiniText}>Relação de Grupos</Text>
+              </TouchableOpacity>
+          </View>
+
           <Text style={styles.subtitle}>
             Selecione uma categoria abaixo para iniciar sua simulação personalizada.
           </Text>
+
         </View>
         
         {/* GRID DE CATEGORIAS */}
@@ -158,6 +187,44 @@ export default function HomeScreen({ navigation, route }: Props) {
         <Text style={styles.footerVersion}>VERSÃO DE TESTES - SIMULADOR RECON</Text>
         <Text style={styles.footerVersion}>Desenvolvido por Alessandro Uchoa</Text>
       </ScrollView>
+
+      {/* MODAL DO POWER BI */}
+      <Modal
+        visible={showPowerBi}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowPowerBi(false)}
+      >
+        <SafeAreaView style={{flex: 1, backgroundColor: '#0F172A'}}>
+           <View style={styles.powerBiHeader}>
+              <View style={styles.powerBiHeaderTitleBox}>
+                 <BarChart3 color="#F59E0B" size={20} style={{marginRight: 8}} />
+                 <Text style={styles.powerBiTitle}>Relação de Grupos</Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowPowerBi(false)} style={styles.closePowerBiBtn}>
+                 <X color="#fff" size={24} />
+              </TouchableOpacity>
+           </View>
+           
+           <View style={{flex: 1, backgroundColor: '#fff'}}>
+              <WebView 
+                source={{ uri: POWERBI_URL }}
+                style={{ flex: 1 }}
+                startInLoadingState
+                renderLoading={() => (
+                    <View style={styles.loadingContainer}>
+                        <ActivityIndicator size="large" color="#0F172A" />
+                        <Text style={styles.loadingText}>Carregando Relação de Grupos...</Text>
+                    </View>
+                )}
+                javaScriptEnabled={true}
+                domStorageEnabled={true}
+                scalesPageToFit={true}
+              />
+           </View>
+        </SafeAreaView>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -189,29 +256,17 @@ const styles = StyleSheet.create({
     marginBottom: 32,
     marginTop: 0,
   },
-  badgeContainer: {
+  headerTopRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F1F5F9',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 20,
-    marginBottom: 16,
-    gap: 6
-  },
-  badgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#64748B',
-    letterSpacing: 0.5
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 1,
   },
   title: { 
     fontSize: 28, 
     fontWeight: '400', 
     color: '#0F172A', // Slate 900
     lineHeight: 36,
-    marginBottom: 8
   },
   titleHighlight: {
     fontWeight: '800',
@@ -221,7 +276,32 @@ const styles = StyleSheet.create({
     fontSize: 15, 
     color: '#64748B', // Slate 500
     lineHeight: 22,
-    maxWidth: '90%'
+    maxWidth: '90%',
+  },
+
+  // POWER BI MINI BUTTON (Novo Estilo)
+  powerBiMiniButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF7ED', // Amber 50
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#FCD34D', // Amber 300
+    marginLeft: 12,
+    marginTop: 4, // Alinha levemente com o topo do texto
+    shadowColor: '#F59E0B',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  powerBiMiniText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#D97706', // Amber 600
+    marginLeft: 6,
   },
 
   // GRID
@@ -333,5 +413,31 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     paddingTop: 1,
     marginTop: 10
-  }
+  },
+
+  // ESTILOS DO MODAL POWER BI
+  powerBiHeader: {
+    height: 60,
+    backgroundColor: '#0F172A',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#334155'
+  },
+  powerBiHeaderTitleBox: {
+    flexDirection: 'row',
+    alignItems: 'center'
+  },
+  powerBiTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  closePowerBiBtn: { padding: 8 },
+  loadingContainer: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 999
+  },
+  loadingText: { marginTop: 12, color: '#64748B', fontSize: 14, fontWeight: '600' },
 });

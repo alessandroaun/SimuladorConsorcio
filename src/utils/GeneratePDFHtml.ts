@@ -93,6 +93,10 @@ export const generateHTML = (
   const pctTaxaAdmin = result.creditoOriginal > 0 ? (result.taxaAdminValor / result.creditoOriginal) : 0;
   const pctFundoReserva = result.creditoOriginal > 0 ? (result.fundoReservaValor / result.creditoOriginal) : 0;
 
+  // Porcentagens de alocação do lance
+  const pctAlocacaoParcela = input.percentualLanceParaParcela || 0;
+  const pctAlocacaoPrazo = 100 - pctAlocacaoParcela;
+
   // Gerar linhas da tabela com design limpo e ARREDONDAMENTO do prazo
   const tableRows = activeScenario.map((scenario, index) => {
       const rowBackground = index % 2 === 0 ? '#ffffff' : '#f8fafc'; // Zebra striping suave
@@ -133,7 +137,7 @@ export const generateHTML = (
                 min-height: 297mm;
                 margin: 0 auto;
                 background: white;
-                padding: 40px;
+                padding: 30px 40px; /* Reduzi um pouco o padding vertical para caber tudo */
                 box-sizing: border-box;
                 position: relative;
             }
@@ -141,20 +145,20 @@ export const generateHTML = (
             /* Cabeçalho */
             .header {
                 text-align: center;
-                margin-bottom: 30px;
+                margin-bottom: 20px;
                 border-bottom: 2px solid #1e3a8a; /* Azul Recon */
-                padding-bottom: 20px;
+                padding-bottom: 15px;
             }
             
             .logo {
-                height: 80px; /* Aumentado de 60px para 80px */
+                height: 70px; /* Levemente reduzido */
                 width: auto;
-                margin-bottom: 15px;
+                margin-bottom: 10px;
             }
             
             .doc-title {
                 font-family: 'Montserrat', sans-serif;
-                font-size: 22px;
+                font-size: 20px;
                 font-weight: 800;
                 color: #1e3a8a;
                 text-transform: uppercase;
@@ -163,9 +167,9 @@ export const generateHTML = (
             }
             
             .doc-subtitle {
-                font-size: 12px;
+                font-size: 11px;
                 color: #64748b;
-                margin-top: 5px;
+                margin-top: 4px;
                 text-transform: uppercase;
             }
 
@@ -174,9 +178,9 @@ export const generateHTML = (
                 display: flex;
                 justify-content: space-between;
                 gap: 15px;
-                margin-bottom: 30px;
+                margin-bottom: 25px;
                 background-color: #f1f5f9;
-                padding: 20px;
+                padding: 15px;
                 border-radius: 12px;
             }
 
@@ -188,17 +192,17 @@ export const generateHTML = (
             .highlight-card:last-child { border-right: none; }
 
             .highlight-label {
-                font-size: 10px;
+                font-size: 9px;
                 text-transform: uppercase;
                 color: #64748b;
                 font-weight: 700;
-                margin-bottom: 5px;
+                margin-bottom: 4px;
                 letter-spacing: 0.5px;
             }
 
             .highlight-value {
                 font-family: 'Montserrat', sans-serif;
-                font-size: 18px;
+                font-size: 16px;
                 font-weight: 800;
                 color: #1e3a8a;
             }
@@ -209,7 +213,7 @@ export const generateHTML = (
             .info-section {
                 display: flex;
                 gap: 30px;
-                margin-bottom: 30px;
+                margin-bottom: 20px;
             }
 
             .info-column {
@@ -218,20 +222,20 @@ export const generateHTML = (
 
             .section-header {
                 font-family: 'Montserrat', sans-serif;
-                font-size: 12px;
+                font-size: 11px;
                 font-weight: 700;
                 color: #1e3a8a;
                 text-transform: uppercase;
                 border-bottom: 1px solid #e2e8f0;
                 padding-bottom: 5px;
-                margin-bottom: 10px;
+                margin-bottom: 8px;
             }
 
             .info-row {
                 display: flex;
                 justify-content: space-between;
-                margin-bottom: 8px;
-                font-size: 11px;
+                margin-bottom: 6px;
+                font-size: 10px;
             }
 
             .label { color: #64748b; font-weight: 600; }
@@ -242,8 +246,8 @@ export const generateHTML = (
                 border: 1px dashed #94a3b8;
                 background-color: #f8fafc;
                 border-radius: 8px;
-                padding: 15px;
-                margin-bottom: 30px;
+                padding: 12px;
+                margin-bottom: 20px;
             }
             
             .lance-grid {
@@ -257,32 +261,52 @@ export const generateHTML = (
                 flex: 1;
                 display: flex;
                 flex-direction: column;
-                align-items: center; /* Centraliza horizontalmente */
+                align-items: center; 
                 justify-content: flex-start;
+            }
+
+            .allocation-bar-container {
+                margin-top: 10px;
+                background-color: #e2e8f0;
+                border-radius: 4px;
+                height: 14px;
+                width: 100%;
+                display: flex;
+                overflow: hidden;
+            }
+
+            .alloc-segment {
+                height: 100%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 8px;
+                font-weight: 700;
+                color: white;
             }
             
             /* Tabela */
             table {
                 width: 100%;
                 border-collapse: collapse;
-                margin-bottom: 20px;
+                margin-bottom: 10px;
             }
             
             thead th {
                 background-color: #1e3a8a;
                 color: white;
                 font-family: 'Montserrat', sans-serif;
-                font-size: 10px;
+                font-size: 9px;
                 font-weight: 700;
                 text-transform: uppercase;
-                padding: 8px 10px;
-                text-align: center; /* Centraliza cabeçalhos */
+                padding: 6px 8px;
+                text-align: center;
                 vertical-align: middle;
             }
             
             td {
-                font-size: 11px; /* Aumentado para 11px */
-                padding: 10px 10px;
+                font-size: 10px;
+                padding: 6px 8px;
                 border-bottom: 1px solid #e2e8f0;
             }
 
@@ -295,16 +319,45 @@ export const generateHTML = (
             .text-blue-800 { color: #1e40af; }
             .text-gray-500 { color: #64748b; }
 
+            /* Informativo de Plano Especial */
+            .plan-info-box {
+                background-color: #eff6ff;
+                border: 1px solid #bfdbfe;
+                border-radius: 8px;
+                padding: 10px;
+                margin-bottom: 15px;
+            }
+            .plan-info-title {
+                font-size: 10px;
+                font-weight: 800;
+                color: #1e40af;
+                text-transform: uppercase;
+                margin-bottom: 4px;
+            }
+            .plan-info-text {
+                font-size: 9px;
+                color: #334155;
+                line-height: 1.3;
+            }
+            .plan-info-list {
+                margin: 2px 0 0 12px;
+                padding: 0;
+            }
+            .plan-info-highlight {
+                color: #1e3a8a;
+                font-weight: 700;
+            }
+
             /* Rodapé */
             .footer {
                 position: absolute;
-                bottom: 15px; /* Empurrado para o fundo (era 30px) */
+                bottom: 15px;
                 left: 40px;
                 right: 40px;
                 text-align: center;
                 border-top: 1px solid #e2e8f0;
-                padding-top: 15px;
-                font-size: 9px;
+                padding-top: 10px;
+                font-size: 8px;
                 color: #94a3b8;
             }
             
@@ -312,11 +365,11 @@ export const generateHTML = (
                 background-color: #fff7ed;
                 color: #c2410c;
                 border: 1px solid #ffedd5;
-                padding: 8px;
+                padding: 6px;
                 border-radius: 6px;
-                font-size: 10px;
+                font-size: 9px;
                 text-align: center;
-                margin-top: 10px;
+                margin-top: 5px;
             }
 
         </style>
@@ -334,7 +387,7 @@ export const generateHTML = (
             <!-- DESTAQUES PRINCIPAIS (KPIs) -->
             <div class="highlights-container">
                 <div class="highlight-card">
-                    <div class="highlight-label">Crédito Contratado</div>
+                    <div class="highlight-label">Crédito Simulado</div>
                     <div class="highlight-value green">${formatBRL(result.creditoOriginal)}</div>
                 </div>
                 <div class="highlight-card">
@@ -342,11 +395,11 @@ export const generateHTML = (
                     <div class="highlight-value">${input.prazo} Meses</div>
                 </div>
                 <div class="highlight-card">
-                    <div class="highlight-label">1ª Parcela</div>
+                    <div class="highlight-label">Parcela Inicial</div>
                     <div class="highlight-value">${formatBRL(primeiraParcelaValor)}</div>
                 </div>
                 <div class="highlight-card">
-                    <div class="highlight-label">Parcela Mensal</div>
+                    <div class="highlight-label">Demais Parcelas</div>
                     <div class="highlight-value">${formatBRL(result.parcelaPreContemplacao)}</div>
                 </div>
             </div>
@@ -378,19 +431,19 @@ export const generateHTML = (
                 <div class="info-column">
                     <div class="section-header">Composição Financeira</div>
                     
-                    <!-- TAXA DE ADMINISTRAÇÃO (Valor em R$, % no título) -->
+                    <!-- TAXA DE ADMINISTRAÇÃO -->
                     <div class="info-row">
                         <span class="label">Taxa de Administração (${formatPct(pctTaxaAdmin)}):</span>
                         <span class="value">${formatBRL(result.taxaAdminValor)}</span>
                     </div>
                     
-                    <!-- FUNDO DE RESERVA (Valor em R$, % no título) -->
+                    <!-- FUNDO DE RESERVA -->
                     <div class="info-row">
                         <span class="label">Fundo de Reserva (${formatPct(pctFundoReserva)}):</span>
                         <span class="value">${formatBRL(result.fundoReservaValor)}</span>
                     </div>
 
-                    <!-- SEGURO DE VIDA (Condicional) -->
+                    <!-- SEGURO DE VIDA -->
                     ${result.seguroMensal > 0 ? `
                     <div class="info-row">
                         <span class="label">Seguro de Vida:</span>
@@ -414,7 +467,7 @@ export const generateHTML = (
             <!-- SESSÃO DE LANCE (Condicional) -->
             ${result.lanceTotal > 0 ? `
             <div class="lance-box">
-                <div class="section-header" style="border:none; text-align:center; margin-bottom:15px;">Composição da Oferta de Lance</div>
+                <div class="section-header" style="border:none; text-align:center; margin-bottom:10px;">Composição da Oferta de Lance</div>
                 <div class="lance-grid">
                     <div class="lance-item">
                         <div class="highlight-label">Recurso Próprio</div>
@@ -424,9 +477,8 @@ export const generateHTML = (
                         <div class="highlight-label">Lance Embutido (${formatPct(input.lanceEmbutidoPct)})</div>
                         <div class="value">${formatBRL(result.creditoOriginal * input.lanceEmbutidoPct)}</div>
                     </div>
-                    <!-- ITEM RENOMEADO: Carta de Avaliação (Sem quebra de linha) -->
                     <div class="lance-item">
-                        <div class="highlight-label">Carta de Avaliação</div>
+                        <div class="highlight-label">Carta Avaliação</div>
                         <div class="value">${formatBRL(input.lanceCartaVal)}</div>
                     </div>
                     <div class="lance-item">
@@ -435,15 +487,49 @@ export const generateHTML = (
                     </div>
                 </div>
                 
+                <!-- BARRA DE DESTINAÇÃO DO LANCE -->
+                <div style="margin-top: 10px;">
+                    <div style="font-size: 9px; color: #64748b; margin-bottom: 2px;">
+                        Destinação do Lance: 
+                        <strong>${pctAlocacaoPrazo.toFixed(0)}% para Redução de Prazo</strong> | 
+                        <strong>${pctAlocacaoParcela.toFixed(0)}% para Redução de Parcela</strong>
+                    </div>
+                    <div class="allocation-bar-container">
+                        <div class="alloc-segment" style="width: ${pctAlocacaoPrazo}%; background-color: #059669;">
+                           ${pctAlocacaoPrazo > 15 ? 'PRAZO' : ''}
+                        </div>
+                        <div class="alloc-segment" style="width: ${pctAlocacaoParcela}%; background-color: #2563EB;">
+                           ${pctAlocacaoParcela > 15 ? 'PARCELA' : ''}
+                        </div>
+                    </div>
+                </div>
+
                 <!-- RODAPÉ DO LANCE -->
-                <div style="margin-top: 15px; border-top: 1px dashed #cbd5e1; padding-top: 15px; display: flex; justify-content: space-between; align-items: flex-end;">
+                <div style="margin-top: 10px; border-top: 1px dashed #cbd5e1; padding-top: 10px; display: flex; justify-content: space-between; align-items: flex-end;">
                     <div style="text-align: left;">
-                         <span class="highlight-label" style="display:block; margin-bottom:4px; font-size:11px;">Crédito Líquido após a Contemplação:</span>
-                         <span style="font-family: 'Montserrat', sans-serif; font-size: 16px; color: #1e3a8a; font-weight: 800;">${formatBRL(creditoLiquidoFinal)}</span>
+                         <span class="highlight-label" style="display:block; margin-bottom:2px; font-size:9px;">Crédito Líquido após a Contemplação:</span>
+                         <span style="font-family: 'Montserrat', sans-serif; font-size: 14px; color: #1e3a8a; font-weight: 800;">${formatBRL(creditoLiquidoFinal)}</span>
                     </div>
                     <div style="text-align: right;">
-                         <span class="label" style="font-size:10px;">Custo Total do Plano:</span>
-                         <span class="value" style="display:block; font-size:12px;">${formatBRL(custoTotal)}</span>
+                         <span class="label" style="font-size:9px;">Custo Total do Plano:</span>
+                         <span class="value" style="display:block; font-size:11px;">${formatBRL(custoTotal)}</span>
+                    </div>
+                </div>
+            </div>
+            ` : ''}
+
+            <!-- INFORMATIVO PLANO ESPECIAL (NOVO) -->
+            ${isSpecialPlan ? `
+            <div class="plan-info-box">
+                <div class="plan-info-title">Sobre o Plano ${result.plano}</div>
+                <div class="plan-info-text">
+                    Este plano oferece parcelas reduzidas de ${formatPct(fatorPlano)} até a contemplação. Ao ser contemplado, você deve escolher entre:
+                    <ul class="plan-info-list">
+                        <li><span class="plan-info-highlight">Opção 1 (Crédito Reduzido):</span> Recebe ${formatPct(fatorPlano)} do crédito contratado e mantém a parcela menor.</li>
+                        <li><span class="plan-info-highlight">Opção 2 (Crédito Cheio):</span> Recebe 100% do crédito, porém a parcela é reajustada para cobrir a diferença.</li>
+                    </ul>
+                    <div style="margin-top: 4px; font-style: italic; color: #1e40af;">
+                        * A tabela abaixo apresenta especificamente o cenário de <strong>${cenarioTitulo}</strong> selecionado nesta simulação.
                     </div>
                 </div>
             </div>
@@ -451,7 +537,7 @@ export const generateHTML = (
 
             <!-- TABELA DE AMORTIZAÇÃO -->
             <div>
-                <div class="section-header">Projeção Pós-Contemplação: ${cenarioTitulo}</div>
+                <div class="section-header">Projeção Pós-Contemplação</div>
                 <table>
                     <thead>
                         <tr>
@@ -473,7 +559,7 @@ export const generateHTML = (
                 <strong>Nota:</strong> Os valores acima representam uma consolidação de <strong>${quotaCount} cotas</strong>.
             </div>` : ''}
 
-            <!-- RODAPÉ (Limpado e movido para o fundo) -->
+            <!-- RODAPÉ -->
             <div class="footer">
                 <p>Este documento é uma simulação preliminar para fins de planejamento financeiro e não representa garantia de contemplação.<br/>
                 Os valores podem sofrer alterações conforme as regras vigentes do grupo e assembleias.</p>
