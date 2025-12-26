@@ -4,6 +4,8 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 // IMPORTANTE: Necessário para gestos funcionarem corretamente (Android/iOS)
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+// IMPORTANTE: Necessário para deep linking e navegação correta na Web
+import * as Linking from 'expo-linking';
 
 import { RootStackParamList } from './src/types/navigation';
 
@@ -18,8 +20,23 @@ import { DataService, AppData } from './src/services/DataService';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
+// --- CONFIGURAÇÃO DE LINKING PARA WEB ---
+const linking = {
+  prefixes: [Linking.createURL('/'), 'https://seuapp.com'],
+  config: {
+    screens: {
+      Home: 'inicio',
+      TableSelection: 'tabelas/:category', // URL fica: /tabelas/IMOVEL
+      SimulationForm: 'formulario/:tableId', // URL fica: /formulario/2011 (Recebe o ID)
+      Result: 'resultados',
+    },
+  },
+};
+
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
+  // O estado appData é mantido aqui para garantir que o DataService inicializou,
+  // mas não precisamos mais passá-lo via props para as rotas.
   const [appData, setAppData] = useState<AppData | null>(null);
 
   useEffect(() => {
@@ -27,15 +44,18 @@ export default function App() {
       let initialData: AppData;
       
       try {
+        // Inicializa o serviço e carrega do cache/local
         initialData = await DataService.initialize();
         setAppData(initialData);
       } catch (error) {
         console.error("Erro fatal ao carregar dados iniciais:", error);
+        // Em produção, aqui você poderia setar um estado de erro global
         return; 
       } finally {
         setIsLoading(false);
       }
 
+      // Tenta atualizar os dados em background (silencioso)
       const updatedData = await DataService.syncWithRemote();
       
       if (updatedData) {
@@ -59,9 +79,11 @@ export default function App() {
   }
 
   return (
-    // CORREÇÃO: Envolvemos o app no GestureHandlerRootView
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <NavigationContainer>
+      <NavigationContainer 
+        linking={linking} 
+        documentTitle={{ formatter: (options, route) => options?.title ?? route?.name }}
+      >
         <Stack.Navigator 
           initialRouteName="Home" 
           screenOptions={{ headerShown: false }}
@@ -69,12 +91,27 @@ export default function App() {
           <Stack.Screen 
             name="Home" 
             component={HomeScreen} 
-            initialParams={{ tables: appData.tables }} 
+            // CORREÇÃO: Removemos initialParams. A Home buscará dados do DataService.
+            options={{ title: 'Simulador Recon - Início' }}
           />
           
-          <Stack.Screen name="TableSelection" component={TableSelectionScreen} />
-          <Stack.Screen name="SimulationForm" component={SimulationFormScreen} />
-          <Stack.Screen name="Result" component={ResultScreen} />
+          <Stack.Screen 
+            name="TableSelection" 
+            component={TableSelectionScreen} 
+            options={{ title: 'Simulador Recon - Seleção de Tabelas' }}
+          />
+          
+          <Stack.Screen 
+            name="SimulationForm" 
+            component={SimulationFormScreen} 
+            options={{ title: 'Simulador Recon - Nova Simulação' }}
+          />
+          
+          <Stack.Screen 
+            name="Result" 
+            component={ResultScreen} 
+            options={{ title: 'Simulador Recon - Resultado' }}
+          />
         </Stack.Navigator>
       </NavigationContainer>
     </GestureHandlerRootView>

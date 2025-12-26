@@ -15,7 +15,7 @@ const STORAGE_KEY_DATE = '@consorcio_last_update';
 // Exemplo: https://cdn.jsdelivr.net/gh/alessandroaun/simuladorconsorcio@main/dados_consorcio.json
 // ==================================================================================
 
-const REMOTE_API_URL = 'https://cdn.jsdelivr.net/gh/alessandroaun/SimuladorConsorcio@master/dados_consorcio.json';
+const REMOTE_API_URL = 'https://nhnejoanmggvinnfphir.supabase.co/storage/v1/object/public/consorciorecon-json/dados_consorcio.json';
 //const REMOTE_API_URL = 'https://raw.githubusercontent.com/alessandroaun/SimuladorConsorcio/refs/heads/master/dados_consorcio.json';
 
 export interface AppData {

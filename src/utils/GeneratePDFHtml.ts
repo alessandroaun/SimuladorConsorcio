@@ -1,6 +1,7 @@
 import { SimulationResult, SimulationInput, ContemplationScenario } from './ConsortiumCalculator';
 
 // --- IMAGENS ---
+// O expo-print lida bem com imagens remotas (HTTPS), não precisa converter para Base64
 const LOGO_IMG = "https://intranet.consorciorecon.com.br/media/photo/logo_4Y8K7jg.PNG"; 
 const WATERMARK_IMG = "https://intranet.consorciorecon.com.br/media/photo/logo_4Y8K7jg.PNG";
 
@@ -20,55 +21,86 @@ export const generateHTML = (
   // --- FORMATADORES ---
   const formatBRL = (val: number) => val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   const formatPct = (val: number) => `${(val * 100).toFixed(2).replace('.', ',')}%`;
-  // Formatador específico para seguro (mais casas decimais, ex: 0,084%)
   const formatSeguroPct = (val: number) => `${(val * 100).toFixed(4).replace('.', ',').replace(/0+$/, '').replace(/,$/, '')}%`; 
   const formatDate = () => new Date().toLocaleDateString('pt-BR');
+  
+  const formatPhone = (phone: string) => {
+    if (!phone) return 'Não informado';
+    const cleaned = phone.replace(/\D/g, '');
+    if (cleaned.length === 11) { 
+        return `(${cleaned.slice(0, 2)}) ${cleaned.slice(2, 7)} ${cleaned.slice(7)}`;
+    } else if (cleaned.length === 10) { 
+        return `(${cleaned.slice(0, 2)}) ${cleaned.slice(2, 6)} ${cleaned.slice(6)}`;
+    }
+    return phone; 
+  };
 
-  // --- LÓGICA DO CENÁRIO ---
+  // --- LÓGICA DE EXIBIÇÃO DE DADOS DO CLIENTE E CONSULTOR ---
+
+  // 1. Cliente: Verifica se tem dados para mostrar ou ocultar
+  const hasClienteName = !!pdfData.cliente && pdfData.cliente.trim() !== '';
+  const hasClientePhone = !!pdfData.telefoneCliente && pdfData.telefoneCliente.trim() !== '';
+  const showClientSection = hasClienteName || hasClientePhone;
+
+  // 2. Consultor: Define telefone padrão se não informado
+  const displayVendedorPhone = (pdfData.telefoneVendedor && pdfData.telefoneVendedor.trim() !== '') 
+    ? formatPhone(pdfData.telefoneVendedor) 
+    : '(35) 3539 8150';
+
+
+  // --- 1. LÓGICA DE SELEÇÃO DE CENÁRIO E CRÉDITO LÍQUIDO ---
   let activeScenario: ContemplationScenario[];
   let cenarioTitulo = "Plano Padrão";
-  let creditoLiquidoFinal = 0; // Valor líquido na mão do cliente
+  let creditoLiquidoFinal = 0;
   
-  if (mode === 'REDUZIDO' && result.cenarioCreditoReduzido) {
-    const cenariosReduzidos = result.cenarioCreditoReduzido as any as ContemplationScenario[];
-    activeScenario = cenariosReduzidos;
-    cenarioTitulo = "Crédito Reduzido";
-    
-    // No modo REDUZIDO, o crédito efetivo já é o valor abatido.
-    const creditoEfetivoScenario = cenariosReduzidos.length > 0 ? cenariosReduzidos[0].creditoEfetivo : result.creditoLiquido;
-    creditoLiquidoFinal = creditoEfetivoScenario - input.lanceCartaVal;
+  // Verifica se é plano especial e define o cenário ativo
+  const isSpecialPlan = result.plano === 'LIGHT' || result.plano === 'SUPERLIGHT';
+  const isCaminho1Viable = result.cenarioCreditoReduzido !== null;
 
-  } else if (mode === 'CHEIO' && result.cenarioCreditoTotal) {
-    const cenariosCheios = result.cenarioCreditoTotal as any as ContemplationScenario[];
-    activeScenario = cenariosCheios;
-    cenarioTitulo = "Crédito Total (100%)";
-    
-    // No modo CHEIO, o cliente recebe a carta cheia, mas paga o lance embutido dela.
-    const creditoEfetivoScenario = cenariosCheios.length > 0 ? cenariosCheios[0].creditoEfetivo : result.creditoLiquido;
-    creditoLiquidoFinal = creditoEfetivoScenario - (result.creditoOriginal * input.lanceEmbutidoPct) - input.lanceCartaVal;
-
+  if (isSpecialPlan && result.cenarioCreditoTotal) {
+      if (mode === 'REDUZIDO' && isCaminho1Viable && result.cenarioCreditoReduzido) {
+          activeScenario = result.cenarioCreditoReduzido;
+          cenarioTitulo = "Crédito Reduzido";
+          creditoLiquidoFinal = activeScenario[0].creditoEfetivo;
+      } else {
+          // Modo CHEIO ou fallback
+          activeScenario = result.cenarioCreditoTotal;
+          cenarioTitulo = "Crédito Total (100%)";
+          creditoLiquidoFinal = activeScenario[0].creditoEfetivo;
+      }
   } else {
+      // Plano Normal
       activeScenario = result.cenariosContemplacao;
       cenarioTitulo = "Plano Padrão";
       creditoLiquidoFinal = result.creditoLiquido;
   }
 
-  // --- CÁLCULOS FINAIS ---
-  
-  // Definição de Fatores para cálculo do custo (recuperando lógica do plano)
-  const isSpecialPlan = result.plano === 'LIGHT' || result.plano === 'SUPERLIGHT';
-  const fatorPlano = result.plano === 'LIGHT' ? 0.75 : result.plano === 'SUPERLIGHT' ? 0.50 : 1.0;
+  // --- 2. LÓGICA DE DISTRIBUIÇÃO DO LANCE ---
+  let realPctAlocacaoParcela = 0;
 
-  // Variáveis auxiliares para a fórmula
+  if (result.lanceTotal > 0 && activeScenario && activeScenario.length > 0) {
+      const primeiroMesCenario = activeScenario[0];
+      const reducaoMensalNaTabela = primeiroMesCenario.reducaoValor || 0;
+      const mesContemplacao = primeiroMesCenario.mes;
+      const prazoRestanteNoMomento = Math.max(1, input.prazo - mesContemplacao);
+      const totalDinheiroUsadoNaParcela = reducaoMensalNaTabela * prazoRestanteNoMomento;
+      realPctAlocacaoParcela = (totalDinheiroUsadoNaParcela / result.lanceTotal) * 100;
+      realPctAlocacaoParcela = Math.min(100, Math.max(0, realPctAlocacaoParcela));
+  } else {
+      realPctAlocacaoParcela = input.percentualLanceParaParcela || 0;
+  }
+
+  const realPctAlocacaoPrazo = 100 - realPctAlocacaoParcela;
+
+  // --- CÁLCULOS FINAIS DE CUSTO ---
+  const fatorPlano = result.plano === 'LIGHT' ? 0.75 : result.plano === 'SUPERLIGHT' ? 0.50 : 1.0;
   const totalSeguroNoPrazo = result.seguroMensal * input.prazo;
-  const lanceEmbutidoValor = result.lanceTotal - input.lanceBolso - result.lanceCartaVal;
-  
-  // Se for crédito reduzido, calcula o valor que foi abatido do crédito base
+  const lanceEmbutidoValor = result.lanceTotal - input.lanceBolso - result.lanceCartaVal; 
+
   const valorReducaoCreditoBase = (isSpecialPlan && mode === 'REDUZIDO') 
     ? (result.creditoOriginal * (1 - fatorPlano)) 
     : 0;
 
-  // FÓRMULA CORRIGIDA: Crédito + Taxas - Lances Embutidos - Carta - Redução
   const custoTotal = 
       result.creditoOriginal + 
       result.taxaAdminValor + 
@@ -81,57 +113,41 @@ export const generateHTML = (
 
   const primeiraParcelaValor = result.totalPrimeiraParcela;
   
-  // Cálculo da porcentagem do seguro para exibição
+  // Porcentagens para exibição
   const seguroPercentual = result.creditoOriginal > 0 ? (result.seguroMensal / result.creditoOriginal) : 0;
-  
-  // Cálculo do Total da Composição Financeira (Display do quadro de composição)
-  // Soma: Taxa Adm + FR + Seguro Total (Mensal * Prazo) + Adesão
   const totalSeguroVida = result.seguroMensal > 0 ? (result.seguroMensal * input.prazo) : 0;
   const totalComposicao = result.taxaAdminValor + result.fundoReservaValor + totalSeguroVida + result.valorAdesao;
-
-  // Porcentagens para exibição nos títulos
   const pctTaxaAdmin = result.creditoOriginal > 0 ? (result.taxaAdminValor / result.creditoOriginal) : 0;
   const pctFundoReserva = result.creditoOriginal > 0 ? (result.fundoReservaValor / result.creditoOriginal) : 0;
 
-  // --- LÓGICA DE CORREÇÃO DA DESTINAÇÃO DO LANCE (TRAVA 40%) ---
-  // Recalcula as porcentagens reais baseado na regra de negócio do Calculator
-  let realPctAlocacaoParcela = input.percentualLanceParaParcela || 0;
-  
-  // Proteção para garantir que temos valores válidos
-  if (result.lanceTotal > 0) {
-    const mesContemplacao = Math.max(1, input.mesContemplacao || 1);
-    const prazoRestante = Math.max(1, input.prazo - mesContemplacao);
-    
-    // Calcula o teto financeiro de redução (40% da parcela pré-contemplação)
-    const tetoReducaoMensal = result.parcelaPreContemplacao * 0.40;
-    
-    // Quanto o usuário QUERIA destinar (em dinheiro)
-    const valorDesejadoParaParcela = result.lanceTotal * (realPctAlocacaoParcela / 100);
-    
-    // Quanto isso daria de redução mensal
-    const reducaoMensalCalculada = valorDesejadoParaParcela / prazoRestante;
+  // Categoria Label e Título
+  const getCategoryLabel = (tableId: string) => {
+      const lowerId = tableId.toLowerCase();
+      if (lowerId.includes('auto')) return 'AUTOMÓVEL';
+      if (lowerId.includes('imovel')) return 'IMÓVEL';
+      if (lowerId.includes('moto')) return 'MOTOCICLETA';
+      if (lowerId.includes('servico')) return 'SERVIÇOS';
+      return 'BEM';
+  };
+  const categoryLabel = getCategoryLabel(input.tableId);
 
-    // Se a redução calculada superar o teto de 40%
-    if (reducaoMensalCalculada > tetoReducaoMensal) {
-        // O valor efetivo usado para parcela é limitado pelo teto * prazo restante
-        const valorMaximoPermitidoParaParcela = tetoReducaoMensal * prazoRestante;
-        
-        // Recalcula a porcentagem baseada no dinheiro que REALMENTE foi usado para parcela
-        realPctAlocacaoParcela = (valorMaximoPermitidoParaParcela / result.lanceTotal) * 100;
-        
-        // Garante que não ultrapasse 100% por arredondamento
-        if (realPctAlocacaoParcela > 100) realPctAlocacaoParcela = 100;
-    }
+  let titleCategory = 'Bem';
+  if (categoryLabel === 'AUTOMÓVEL' || categoryLabel === 'MOTOCICLETA') {
+      titleCategory = 'Veículo';
+  } else if (categoryLabel === 'IMÓVEL') {
+      titleCategory = 'Imóvel';
+  } else if (categoryLabel === 'SERVIÇOS') {
+      titleCategory = 'Serviços';
   }
 
-  // Define a alocação do prazo com o que sobrou
-  const realPctAlocacaoPrazo = 100 - realPctAlocacaoParcela;
+  // Lances Pct
+  const lanceTotalPct = result.creditoOriginal > 0 ? (result.lanceTotal / result.creditoOriginal) : 0;
+  const lanceBolsoPct = result.creditoOriginal > 0 ? (input.lanceBolso / result.creditoOriginal) : 0;
+  const lanceCartaPct = result.creditoOriginal > 0 ? (input.lanceCartaVal / result.creditoOriginal) : 0;
 
-  // --- FIM DA LÓGICA CORRIGIDA ---
-
-  // Gerar linhas da tabela com design limpo e ARREDONDAMENTO do prazo
+  // Gerar linhas da tabela
   const tableRows = activeScenario.map((scenario, index) => {
-      const rowBackground = index % 2 === 0 ? '#ffffff' : '#f8fafc'; // Zebra striping suave
+      const rowBackground = index % 2 === 0 ? '#ffffff' : '#f8fafc';
       return `
       <tr style="background-color: ${rowBackground};">
           <td class="text-center py-2 text-gray-700 font-bold">${scenario.mes}</td>
@@ -141,14 +157,13 @@ export const generateHTML = (
       </tr>
   `}).join('');
 
-  // --- CSS INLINE OTIMIZADO PARA PDF ---
   return `
     <!DOCTYPE html>
     <html lang="pt-BR">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Simulação Recon</title>
+        <title>Simulação ${pdfData.cliente}</title>
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=Open+Sans:wght@400;600&display=swap');
             
@@ -163,27 +178,25 @@ export const generateHTML = (
                 -webkit-print-color-adjust: exact;
             }
 
-            /* Container Principal A4 */
             .page-container {
                 width: 210mm;
                 min-height: 297mm;
                 margin: 0 auto;
                 background: white;
-                padding: 30px 40px; /* Reduzi um pouco o padding vertical para caber tudo */
+                padding: 30px 40px;
                 box-sizing: border-box;
                 position: relative;
             }
 
-            /* Cabeçalho */
             .header {
                 text-align: center;
                 margin-bottom: 20px;
-                border-bottom: 2px solid #1e3a8a; /* Azul Recon */
+                border-bottom: 2px solid #1e3a8a;
                 padding-bottom: 15px;
             }
             
             .logo {
-                height: 85px; /* Levemente reduzido */
+                height: 85px;
                 width: auto;
                 margin-bottom: 10px;
             }
@@ -199,13 +212,13 @@ export const generateHTML = (
             }
             
             .doc-subtitle {
-                font-size: 11px;
+                font-size: 12px;
                 color: #64748b;
                 margin-top: 4px;
                 text-transform: uppercase;
+                letter-spacing: 0.5px;
             }
 
-            /* Seção de Destaques (Highlights) */
             .highlights-container {
                 display: flex;
                 justify-content: space-between;
@@ -241,7 +254,6 @@ export const generateHTML = (
             
             .highlight-value.green { color: #15803d; }
 
-            /* Grids de Informação */
             .info-section {
                 display: flex;
                 gap: 30px;
@@ -273,7 +285,6 @@ export const generateHTML = (
             .label { color: #64748b; font-weight: 600; }
             .value { color: #0f172a; font-weight: 700; text-align: right; }
 
-            /* Box de Lance */
             .lance-box {
                 border: 1px dashed #94a3b8;
                 background-color: #f8fafc;
@@ -317,7 +328,6 @@ export const generateHTML = (
                 color: white;
             }
             
-            /* Tabela */
             table {
                 width: 100%;
                 border-collapse: collapse;
@@ -344,14 +354,11 @@ export const generateHTML = (
 
             .text-center { text-align: center; }
             .text-right { text-align: right; }
-            
-            /* Utilitários de Texto */
             .text-xs { font-size: 9px; }
             .font-bold { font-weight: 700; }
             .text-blue-800 { color: #1e40af; }
             .text-gray-500 { color: #64748b; }
 
-            /* Informativo de Plano Especial */
             .plan-info-box {
                 background-color: #eff6ff;
                 border: 1px solid #bfdbfe;
@@ -380,14 +387,13 @@ export const generateHTML = (
                 font-weight: 700;
             }
 
-            /* Rodapé */
             .footer {
                 position: absolute;
                 bottom: 15px;
                 left: 40px;
                 right: 40px;
                 text-align: center;
-                border-top: 1px solid #e2e8f0;
+                border-top: none;
                 padding-top: 10px;
                 font-size: 8px;
                 color: #94a3b8;
@@ -403,20 +409,20 @@ export const generateHTML = (
                 text-align: center;
                 margin-top: 5px;
             }
-
         </style>
     </head>
     <body>
+        
         <div class="page-container">
             
-            <!-- CABEÇALHO -->
             <div class="header">
                 <img src="${LOGO_IMG}" class="logo" alt="Recon Consórcios" />
                 <h1 class="doc-title">Proposta de Simulação</h1>
-                <p class="doc-subtitle">Plano: ${result.creditoOriginal > 0 ? result.plano : 'Detalhes do Plano'}</p>
+                <p class="doc-subtitle">
+                    PLANO: <span style="color: #1e40af; font-weight: 800;">${categoryLabel}</span> ${result.creditoOriginal > 0 ? result.plano : ''}
+                </p>
             </div>
 
-            <!-- DESTAQUES PRINCIPAIS (KPIs) -->
             <div class="highlights-container">
                 <div class="highlight-card">
                     <div class="highlight-label">Crédito Simulado</div>
@@ -436,22 +442,32 @@ export const generateHTML = (
                 </div>
             </div>
 
-            <!-- INFORMAÇÕES DETALHADAS (2 Colunas) -->
             <div class="info-section">
-                <!-- Coluna 1: Cliente e Consultor -->
                 <div class="info-column">
+                    
+                    ${showClientSection ? `
                     <div class="section-header">Dados do Cliente</div>
+                    ${hasClienteName ? `
                     <div class="info-row">
                         <span class="label">Nome:</span>
-                        <span class="value">${pdfData.cliente || 'Não informado'}</span>
-                    </div>
+                        <span class="value">${pdfData.cliente}</span>
+                    </div>` : ''}
+                    ${hasClientePhone ? `
                     <div class="info-row">
-                        <span class="label">Consultor:</span>
-                        <span class="value">${pdfData.vendedor || 'Recon'}</span>
+                        <span class="label">Contato:</span>
+                        <span class="value">${formatPhone(pdfData.telefoneCliente)}</span>
+                    </div>` : ''}
+                    <div style="height: 4px;"></div>
+                    ` : ''}
+
+                    <div class="section-header">Dados do Consultor</div>
+                    <div class="info-row">
+                        <span class="label">Nome:</span>
+                        <span class="value">${pdfData.vendedor || 'Consórcio Nacional Recon'}</span>
                     </div>
                      <div class="info-row">
                         <span class="label">Contato:</span>
-                        <span class="value">${pdfData.telefoneVendedor || '-'}</span>
+                        <span class="value">${displayVendedorPhone}</span>
                     </div>
                     <div class="info-row">
                         <span class="label">Data da Simulação:</span>
@@ -459,36 +475,30 @@ export const generateHTML = (
                     </div>
                 </div>
 
-                <!-- Coluna 2: Detalhes Financeiros -->
                 <div class="info-column">
                     <div class="section-header">Composição Financeira</div>
                     
-                    <!-- TAXA DE ADMINISTRAÇÃO -->
                     <div class="info-row">
                         <span class="label">Taxa de Administração (${formatPct(pctTaxaAdmin)}):</span>
                         <span class="value">${formatBRL(result.taxaAdminValor)}</span>
                     </div>
                     
-                    <!-- FUNDO DE RESERVA -->
                     <div class="info-row">
                         <span class="label">Fundo de Reserva (${formatPct(pctFundoReserva)}):</span>
                         <span class="value">${formatBRL(result.fundoReservaValor)}</span>
                     </div>
 
-                    <!-- SEGURO DE VIDA -->
                     ${result.seguroMensal > 0 ? `
                     <div class="info-row">
                         <span class="label">Seguro de Vida:</span>
                         <span class="value">${formatSeguroPct(seguroPercentual)} ao mês</span>
                     </div>` : ''}
 
-                    <!-- ADESÃO -->
                     <div class="info-row">
                         <span class="label">Adesão:</span>
                         <span class="value">${formatBRL(result.valorAdesao)}</span>
                     </div>
 
-                    <!-- LINHA DE TOTALIZAÇÃO -->
                     <div class="info-row" style="border-top: 1px solid #e2e8f0; margin-top: 8px; padding-top: 8px;">
                         <span class="label" style="color: #1e3a8a; font-weight: 800;">Total:</span>
                         <span class="value" style="color: #1e3a8a; font-weight: 800;">${formatBRL(totalComposicao)}</span>
@@ -496,13 +506,11 @@ export const generateHTML = (
                 </div>
             </div>
 
-            <!-- SESSÃO DE LANCE (Condicional) -->
-            ${result.lanceTotal > 0 ? `
             <div class="lance-box">
                 <div class="section-header" style="border:none; text-align:center; margin-bottom:10px;">Composição da Oferta de Lance</div>
                 <div class="lance-grid">
                     <div class="lance-item">
-                        <div class="highlight-label">Recurso Próprio</div>
+                        <div class="highlight-label">Recurso Próprio (${formatPct(lanceBolsoPct)})</div>
                         <div class="value">${formatBRL(input.lanceBolso)}</div>
                     </div>
                     <div class="lance-item">
@@ -510,16 +518,18 @@ export const generateHTML = (
                         <div class="value">${formatBRL(result.creditoOriginal * input.lanceEmbutidoPct)}</div>
                     </div>
                     <div class="lance-item">
-                        <div class="highlight-label">Carta Avaliação</div>
+                        <div class="highlight-label">Carta Avaliação (${formatPct(lanceCartaPct)})</div>
                         <div class="value">${formatBRL(input.lanceCartaVal)}</div>
                     </div>
                     <div class="lance-item">
-                        <div class="highlight-label">Lance Total</div>
+                        <div class="highlight-label">
+                            Lance Total <span style="color: #1e40af; font-weight: 800;">(${formatPct(lanceTotalPct)})</span>
+                        </div>
                         <div class="value" style="color:#1e3a8a;">${formatBRL(result.lanceTotal)}</div>
                     </div>
                 </div>
                 
-                <!-- BARRA DE DESTINAÇÃO DO LANCE -->
+                ${result.lanceTotal > 0 ? `
                 <div style="margin-top: 10px;">
                     <div style="font-size: 9px; color: #64748b; margin-bottom: 2px;">
                         Destinação do Lance: 
@@ -535,8 +545,8 @@ export const generateHTML = (
                         </div>
                     </div>
                 </div>
+                ` : ''}
 
-                <!-- RODAPÉ DO LANCE -->
                 <div style="margin-top: 10px; border-top: 1px dashed #cbd5e1; padding-top: 10px; display: flex; justify-content: space-between; align-items: flex-end;">
                     <div style="text-align: left;">
                          <span class="highlight-label" style="display:block; margin-bottom:2px; font-size:9px;">Crédito Líquido após a Contemplação:</span>
@@ -548,9 +558,7 @@ export const generateHTML = (
                     </div>
                 </div>
             </div>
-            ` : ''}
 
-            <!-- INFORMATIVO PLANO ESPECIAL (NOVO) -->
             ${isSpecialPlan ? `
             <div class="plan-info-box">
                 <div class="plan-info-title">Sobre o Plano ${result.plano}</div>
@@ -567,7 +575,6 @@ export const generateHTML = (
             </div>
             ` : ''}
 
-            <!-- TABELA DE AMORTIZAÇÃO -->
             <div>
                 <div class="section-header">Projeção Pós-Contemplação</div>
                 <table>
@@ -585,13 +592,11 @@ export const generateHTML = (
                 </table>
             </div>
 
-            <!-- ALERTA DE MÚLTIPLAS COTAS -->
             ${quotaCount > 1 ? `
             <div class="quota-alert">
                 <strong>Nota:</strong> Os valores acima representam uma consolidação de <strong>${quotaCount} cotas</strong>.
             </div>` : ''}
 
-            <!-- RODAPÉ -->
             <div class="footer">
                 <p>Este documento é uma simulação preliminar para fins de planejamento financeiro e não representa garantia de contemplação.<br/>
                 Os valores podem sofrer alterações conforme as regras vigentes do grupo e assembleias.</p>
