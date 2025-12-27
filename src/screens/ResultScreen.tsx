@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { 
   View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert, 
-  Platform, StatusBar, Modal, TextInput, KeyboardAvoidingView, ActivityIndicator, Linking, useWindowDimensions, Animated
+  Platform, StatusBar, Modal, TextInput, KeyboardAvoidingView, ActivityIndicator, Linking, useWindowDimensions, Animated, LayoutChangeEvent
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context'; 
@@ -12,16 +12,11 @@ import {
   Ban, DollarSign, Calendar, FileText, Info, RefreshCw, TrendingDown,
   User, Phone, Briefcase, X, FileOutput, Wallet, PieChart, 
   BarChart3, Users, Database, Target, Trophy, TrendingUp, MessageCircle
-
 } from 'lucide-react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import Svg, { Path, Rect, Circle, Defs, LinearGradient, Stop, Text as SvgText, Line } from 'react-native-svg';
-
-// --- ALTERAÇÃO 1: USAR FILE SYSTEM NATIVO PARA O APK ---
-// Se der erro de 'legacy', troque por: import * as FileSystem from 'expo-file-system/legacy';
-// Troque a importação antiga por esta:
-import * as FileSystem from 'expo-file-system/legacy';
+import Svg, { Rect, Defs, LinearGradient, Stop, Text as SvgText, Line } from 'react-native-svg';
+import * as FileSystem from 'expo-file-system/legacy'; // Use o padrão. Se der erro, use o /legacy
 
 import { RootStackParamList } from '../types/navigation';
 import { ConsortiumCalculator, ContemplationScenario, SimulationInput, SimulationResult } from '../utils/ConsortiumCalculator';
@@ -50,119 +45,119 @@ const STORAGE_KEY_META = '@consorcio_meta_v1';
 // Componente Animado
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
-// --- COMPONENTE DE GRÁFICO (REUTILIZÁVEL) ---
+// --- COMPONENTE DE GRÁFICO (MODERNIZADO E RESPONSIVO) ---
 const CustomBarChart = ({ data, color, title, suffix = "", type = "int" }: { data: any[], color: string, title: string, suffix?: string, type?: "int" | "float" }) => {
+    const [containerWidth, setContainerWidth] = useState(0);
+
+    const onLayout = (event: LayoutChangeEvent) => {
+        const { width } = event.nativeEvent.layout;
+        setContainerWidth(width);
+    };
+
     if (!data || data.length === 0) return null;
 
-    const chartHeight = 160;
-    const chartWidth = 300; // Largura fixa ou dinâmica
-    const padding = 20;
-    const barWidth = 16;
-       
+    const chartHeight = 180;
+    // Se ainda não calculou largura, usa um valor padrão temporário para não quebrar
+    const chartWidth = containerWidth > 0 ? containerWidth : 300; 
+    
+    const paddingHorizontal = 10;
+    const paddingVertical = 25;
+    const usableWidth = chartWidth - (paddingHorizontal * 2);
+    const usableHeight = chartHeight - (paddingVertical * 2);
+
     // Cálculos de Escala
     const values = data.map(d => d.value);
-    const maxVal = Math.max(...values) * 1.2 || 10; // 20% de margem no topo
-    const minVal = 0;
+    const maxVal = Math.max(...values);
+    // Adiciona margem superior de 15% para o texto não cortar
+    const ceiling = maxVal > 0 ? maxVal * 1.15 : 10; 
 
-    const getX = (index: number) => padding + index * ((chartWidth - padding * 2) / (data.length - 1 || 1));
-    const getY = (val: number) => chartHeight - padding - ((val - minVal) / (maxVal - minVal)) * (chartHeight - padding * 2);
+    const barWidth = Math.min(32, (usableWidth / data.length) * 0.6); // Barras não ficam muito largas
+    const spacing = (usableWidth - (barWidth * data.length)) / (data.length + 1);
 
-    // Construção do Caminho da Linha (Curva)
-    let pathD = `M ${getX(0)} ${getY(values[0])}`;
-    for (let i = 1; i < data.length; i++) {
-        // Curva Bezier simples para suavizar
-        const x = getX(i);
-        const y = getY(values[i]);
-        const prevX = getX(i - 1);
-        const prevY = getY(values[i - 1]);
-        const controlX = (prevX + x) / 2;
-        const controlY = (prevY + y) / 2; 
-        pathD += ` C ${controlX} ${prevY}, ${controlX} ${y}, ${x} ${y}`;
-    }
+    const getX = (index: number) => paddingHorizontal + spacing + (index * (barWidth + spacing));
+    const getY = (val: number) => {
+        const ratio = val / ceiling;
+        return paddingVertical + (usableHeight - (ratio * usableHeight));
+    };
 
     return (
-        <View style={styles.chartContainer}>
-            <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 10}}>
+        <View style={styles.chartContainer} onLayout={onLayout}>
+            <View style={styles.chartHeader}>
                 <Text style={styles.chartTitle}>{title}</Text>
-                <View style={{flex: 1, height: 1, backgroundColor: '#E2E8F0', marginLeft: 10}} />
+                <View style={styles.chartHeaderLine} />
             </View>
               
-            <View style={{ alignItems: 'center' }}>
+            <View style={{ alignItems: 'center', width: '100%' }}>
                 <Svg width={chartWidth} height={chartHeight}>
                     <Defs>
                         <LinearGradient id={`grad${color}`} x1="0" y1="0" x2="0" y2="1">
                             <Stop offset="0" stopColor={color} stopOpacity="0.8" />
-                            <Stop offset="1" stopColor={color} stopOpacity="0.2" />
+                            <Stop offset="1" stopColor={color} stopOpacity="0.3" />
                         </LinearGradient>
                     </Defs>
 
                     {/* Linhas de Grade (Grid Lines) */}
                     {[0, 0.25, 0.5, 0.75, 1].map((factor, i) => {
-                        const y = padding + factor * (chartHeight - padding * 2);
-                        return <Line key={i} x1={padding} y1={y} x2={chartWidth - padding} y2={y} stroke="#F1F5F9" strokeWidth="1" />;
+                        const y = paddingVertical + (usableHeight * factor);
+                        return (
+                            <Line 
+                                key={i} 
+                                x1={paddingHorizontal} 
+                                y1={y} 
+                                x2={chartWidth - paddingHorizontal} 
+                                y2={y} 
+                                stroke="#F1F5F9" 
+                                strokeWidth="1" 
+                                strokeDasharray="4 4"
+                            />
+                        );
                     })}
 
-                    {/* Barras */}
+                    {/* Barras e Rótulos */}
                     {data.map((item, i) => {
                         const x = getX(i);
                         const y = getY(item.value);
-                        const h = chartHeight - padding - y;
+                        const h = (paddingVertical + usableHeight) - y;
+                        
+                        // Centraliza o texto na barra
+                        const textX = x + (barWidth / 2);
+
                         return (
                             <React.Fragment key={i}>
                                 <Rect
-                                    x={x - barWidth / 2}
+                                    x={x}
                                     y={y}
                                     width={barWidth}
                                     height={h}
                                     fill={`url(#grad${color})`}
-                                    rx={4}
+                                    rx={4} // Bordas arredondadas no topo
+                                    ry={4}
                                 />
-                                {/* Rótulo do Eixo X */}
-                                <SvgText
-                                    x={x}
-                                    y={chartHeight - 2}
-                                    fontSize="10"
-                                    fill="#64748B"
-                                    textAnchor="middle"
-                                >
-                                    {item.label}
-                                </SvgText>
                                 {/* Rótulo do Valor (Topo da barra) */}
                                 <SvgText
-                                    x={x}
-                                    y={y - 6}
-                                    fontSize="12"
+                                    x={textX}
+                                    y={y - 8}
+                                    fontSize="11"
                                     fill={color}
                                     fontWeight="bold"
                                     textAnchor="middle"
                                 >
                                     {type === 'float' ? item.value.toFixed(1) : item.value}{suffix}
                                 </SvgText>
+
+                                {/* Rótulo do Eixo X (Data) */}
+                                <SvgText
+                                    x={textX}
+                                    y={chartHeight - 6}
+                                    fontSize="10"
+                                    fill="#94A3B8"
+                                    textAnchor="middle"
+                                >
+                                    {item.label}
+                                </SvgText>
                             </React.Fragment>
                         );
                     })}
-
-                    {/* Curva Suave */}
-                    <Path
-                        d={pathD}
-                        fill="none"
-                        stroke={color}
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                    />
-
-                    {/* Pontos na Curva */}
-                    {data.map((item, i) => (
-                        <Circle
-                            key={`c${i}`}
-                            cx={getX(i)}
-                            cy={getY(item.value)}
-                            r="3"
-                            fill="#fff"
-                            stroke={color}
-                            strokeWidth="2"
-                        />
-                    ))}
                 </Svg>
             </View>
         </View>
@@ -179,17 +174,8 @@ export default function ResultScreen({ route, navigation }: Props) {
   const contentWidth = Math.min(windowWidth, MAX_WIDTH);
   const paddingHorizontal = isDesktop ? 32 : 24;
 
-// Função para abrir o modal
   const handleOpenWhatsappModal = () => {
     setShowWhatsappModal(true);
-    {/* --- NOVO BOTÃO: ENVIAR RESUMO (WHATSAPP) --- */}
-          <TouchableOpacity 
-            style={[styles.shareBtn, { backgroundColor: '#25D366', marginTop: 12, borderColor: '#1ebc57' }]} 
-            onPress={handleOpenWhatsappModal} // <--- ALTERADO PARA ABRIR O MODAL
-          >
-            <MessageCircle size={20} color="#fff" />
-            <Text style={styles.shareBtnText}>Enviar Resumo (WhatsApp)</Text>
-          </TouchableOpacity>
   };
 
   // Função que realmente envia a mensagem (Chamada pelo botão do Modal)
@@ -637,9 +623,8 @@ _Esta é uma simulação preliminar. Sujeito a alterações._
 
   const handleOpenPdfModal = () => setShowPdfModal(true);
 
-  // --- ALTERAÇÃO 2: LÓGICA DE PDF ATUALIZADA PARA ANDROID ---
-// --- FUNÇÃO CORRIGIDA ---
-const handleGeneratePDF = async () => {
+  // --- LÓGICA DE PDF ---
+  const handleGeneratePDF = async () => {
     if (isGeneratingPdf) return;
     setIsGeneratingPdf(true);
 
@@ -661,7 +646,7 @@ const handleGeneratePDF = async () => {
         } as any, 
         quotaCount
       );
-       
+        
       // Fallback para Web
       if (Platform.OS === 'web') {
           const printWindow = window.open('', '_blank');
@@ -687,10 +672,7 @@ const handleGeneratePDF = async () => {
       const valorFormatado = valorTotalCredito.toLocaleString('pt-BR', { minimumFractionDigits: 0 });
       const fileName = `Simulacao_${nomeClienteLimpo}_R$${valorFormatado}.pdf`;
       
-      // 3. Renomeia usando FileSystem Nativo
-      // --- SOLUÇÃO DO ERRO DE TIPAGEM ---
-      // Usamos 'as any' para garantir que o TypeScript não bloqueie o build,
-      // pois sabemos que documentDirectory existe no runtime do Android.
+      // 3. Renomeia usando FileSystem Nativo (Com Cast ANY para evitar erro de build)
       const fs = FileSystem as any;
       let targetDirectory = fs.documentDirectory || fs.cacheDirectory;
       
@@ -805,7 +787,7 @@ const handleGeneratePDF = async () => {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
-       
+        
       {/* HEADER */}
       <View style={styles.headerWrapper}>
         <View style={[styles.headerContent, { width: contentWidth, paddingHorizontal }]}>
@@ -1320,7 +1302,7 @@ const handleGeneratePDF = async () => {
                         </TouchableOpacity>
                       )}
                   </View>
-                   
+                    
                   <ScrollView style={{maxHeight: 400}} showsVerticalScrollIndicator={false}>
                       <Text style={styles.modalSectionTitle}>Dados do Cliente</Text>
                       <View style={styles.formGroup}>
@@ -1445,7 +1427,7 @@ const handleGeneratePDF = async () => {
               </View>
           </KeyboardAvoidingView>
       </Modal>
-       
+        
       {/* MODAL DE DETALHES DO GRUPO */}
       <Modal 
           visible={!!selectedGroup} 
@@ -1472,7 +1454,7 @@ const handleGeneratePDF = async () => {
                    </View>
                    
                    <ScrollView style={styles.groupModalScroll} showsVerticalScrollIndicator={false}>
-                                                                                                      
+                                                                                                    
                        {/* Seção de Análise do Lance (Se existir lance) */}
                        {analysis && analysis.status !== 'unknown' && (
                            <View style={[
@@ -1481,12 +1463,12 @@ const handleGeneratePDF = async () => {
                                analysis.status === 'medium' ? styles.analysisMedium : styles.analysisLow
                            ]}>
                                <View style={styles.analysisHeader}>
-                                   {analysis.status === 'high' ? <Trophy size={18} color="#15803D" /> :
-                                    analysis.status === 'medium' ? <TrendingUp size={18} color="#B45309" /> :
+                                   {analysis.status === 'high' ? <Trophy size={18} color="#15803D" /> : 
+                                    analysis.status === 'medium' ? <TrendingUp size={18} color="#B45309" /> : 
                                     <AlertTriangle size={18} color="#B91C1C" />}
                                    <Text style={[
                                         styles.analysisTitle,
-                                        analysis.status === 'high' ? {color: '#15803D'} :
+                                        analysis.status === 'high' ? {color: '#15803D'} : 
                                         analysis.status === 'medium' ? {color: '#B45309'} : {color: '#B91C1C'}
                                    ]}>
                                          Análise do Seu Lance
@@ -1509,7 +1491,7 @@ const handleGeneratePDF = async () => {
                                    <View style={[
                                         styles.progressBarFill, 
                                         { width: `${Math.min(100, (analysis.userBidPct / (analysis.avgBid * 1.2)) * 100)}%` },
-                                        analysis.status === 'high' ? {backgroundColor: '#22C55E'} :
+                                        analysis.status === 'high' ? {backgroundColor: '#22C55E'} : 
                                         analysis.status === 'medium' ? {backgroundColor: '#F59E0B'} : {backgroundColor: '#EF4444'}
                                    ]} />
                                    <View style={[styles.avgMarker, { left: `${Math.min(100, (analysis.avgBid / (analysis.avgBid * 1.2)) * 100)}%` }]} />
@@ -1611,9 +1593,9 @@ const handleGeneratePDF = async () => {
                                <CustomBarChart 
                                    data={getGroupChartsData.chartLances} 
                                    color="#F59E0B" // Laranja
-                                   title="Médias de Lances Livres"
-                                   suffix="%"
+                                   title="Percentual das Médias de Lances Livres"
                                    type="float"
+                                   // suffix="%" removido aqui
                                />
 
                                <View style={{height: 20}} />
@@ -1621,10 +1603,10 @@ const handleGeneratePDF = async () => {
                                {/* Gráfico 3: Menor Lance Livre (NOVO) */}
                                <CustomBarChart 
                                    data={getGroupChartsData.chartMenorLance} 
-                                   color="#E11D48" // Vermelho/Rose para diferenciar (Indicando "Mínimo")
-                                   title="Menores Lances Livres"
-                                   suffix="%"
+                                   color="#E11D48" // Vermelho/Rose
+                                   title="Percentual dos Menores Lances Livres"
                                    type="float"
+                                   // suffix="%" removido aqui
                                />
                            </View>
                        )}
@@ -2072,7 +2054,7 @@ const styles = StyleSheet.create({
   groupCloseButton: { backgroundColor: '#0F172A', paddingVertical: 16, borderRadius: 14, alignItems: 'center' },
   groupCloseButtonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 14, letterSpacing: 0.5 },
 
-  // ESTILOS DE GRÁFICO (Chart)
+  // ESTILOS DE GRÁFICO (Chart) - ATUALIZADOS
   chartContainer: {
     backgroundColor: '#fff',
     borderRadius: 16,
@@ -2081,19 +2063,32 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E2E8F0',
     alignItems: 'center',
-    width: '100%'
+    width: '100%',
+    shadowColor: '#64748B', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2
+  },
+  chartHeader: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16
   },
   chartTitle: {
     fontSize: 12,
     color: '#64748B',
     fontWeight: '700',
-    textTransform: 'uppercase'
+    textTransform: 'uppercase',
+    marginRight: 10
+  },
+  chartHeaderLine: {
+      flex: 1,
+      height: 1,
+      backgroundColor: '#E2E8F0'
   },
   shareBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#1E3A8A', // Cor padrão (Azul), o botão do Whats sobrescreve para Verde
+    backgroundColor: '#1E3A8A', 
     paddingVertical: 14,
     paddingHorizontal: 20,
     borderRadius: 12,
@@ -2104,7 +2099,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
-    gap: 8, // Espaço entre ícone e texto
+    gap: 8, 
   },
   shareBtnText: {
     color: '#FFFFFF',
@@ -2115,15 +2110,15 @@ const styles = StyleSheet.create({
   headerActionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center', // Centraliza o conteúdo
-    paddingVertical: 6,       // Altura menor para caber dois no header
+    justifyContent: 'center', 
+    paddingVertical: 6,       
     paddingHorizontal: 10,
     borderRadius: 8,
-    width: 140,               // LARGURA FIXA para garantir que ambos tenham o mesmo tamanho
+    width: 140,              
   },
   headerActionBtnText: {
     color: '#FFFFFF',
-    fontSize: 11,             // Fonte um pouco menor para não quebrar
+    fontSize: 11,             
     fontWeight: '700',
     marginLeft: 6,
     textTransform: 'uppercase',

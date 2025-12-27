@@ -3,8 +3,9 @@
     "name": "Simulador Recon",
     "slug": "simulador-recon-consorcios",
     "version": "1.0.0",
+    "scheme": "reconsimulador",
     "orientation": "default",
-    "icon": "./assets/logo_app_recon.png",
+    "icon": "./assets/SIMULADOR.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
@@ -18,7 +19,7 @@
     "android": {
       "versionCode": 1,
       "adaptiveIcon": {
-        "foregroundImage": "./assets/logo_app_recon.png",
+        "foregroundImage": "./assets/SIMULADOR.png",
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
